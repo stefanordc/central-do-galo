@@ -1,0 +1,45 @@
+"use client";
+
+import { FormEvent, useEffect, useRef, useState } from "react";
+
+type CategoriaResumo = {
+  nome: string;
+  slug: string;
+  principal: boolean;
+};
+
+type Categoria = {
+  id: string;
+  nome: string;
+  slug: string;
+  descricao: string | null;
+  ordem: number;
+  total_noticias: number;
+};
+
+type Fonte = {
+  id: string;
+  nome: string;
+  slug: string;
+  tipo: string;
+  confiabilidade: number;
+  oficial: boolean;
+  ativo: boolean;
+};
+
+type PostX = {
+  id: string;
+  post_id: string;
+  url: string;
+  texto: string | null;
+  publicado_em: string | null;
+  coletado_em: string;
+  metricas: Record<string, number>;
+  midia: Array<Record<string, unknown>>;
+  embed_html: string | null;
+  embed_status: string;
+  embed_atualizado_em: string | null;
+};
+
+type PostXFeed = PostX & {
+  conta_id:

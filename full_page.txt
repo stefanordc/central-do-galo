@@ -1,0 +1,258 @@
+0: "use client";
+1: 
+2: import { FormEvent, useEffect, useRef, useState } from "react";
+3: 
+4: type CategoriaResumo = {
+5:   nome: string;
+6:   slug: string;
+7:   principal: boolean;
+8: };
+9: 
+10: type Categoria = {
+11:   id: string;
+12:   nome: string;
+13:   slug: string;
+14:   descricao: string | null;
+15:   ordem: number;
+16:   total_noticias: number;
+17: };
+18: 
+19: type Fonte = {
+20:   id: string;
+21:   nome: string;
+22:   slug: string;
+23:   tipo: string;
+24:   confiabilidade: number;
+25:   oficial: boolean;
+26:   ativo: boolean;
+27: };
+28: 
+29: type PostX = {
+30:   id: string;
+31:   post_id: string;
+32:   url: string;
+33:   texto: string | null;
+34:   publicado_em: string | null;
+35:   coletado_em: string;
+36:   metricas: Record<string, number>;
+37:   midia: Array<Record<string, unknown>>;
+38:   embed_html: string | null;
+39:   embed_status: string;
+40:   embed_atualizado_em: string | null;
+41: };
+42: 
+43: type PostXFeed = PostX & {
+44:   conta_id: string;
+45:   conta_nome: string;
+46:   conta_usuario: string;
+47:   conta_foto_url: string | null;
+48:   conta_oficial: boolean;
+49: };
+50: 
+51: type ContaXComPosts = {
+52:   id: string;
+53:   nome: string;
+54:   usuario: string;
+55:   foto_url: string | null;
+56:   oficial: boolean;
+57:   confiabilidade: number;
+58:   ultima_sincronizacao: string | null;
+59:   status_sync: string;
+60:   sync_erro: string | null;
+61:   posts: PostX[];
+62: };
+63: 
+64: type RadarXStatus = {
+65:   fonte: string;
+66:   token_configurado: boolean;
+67:   scraping_habilitado?: boolean;
+68:   job_backend_habilitado: boolean;
+69:   contas_ativas: number;
+70:   nunca_sincronizadas: number;
+71:   posts_total: number;
+72:   embeds_ok: number;
+73: };
+74: 
+75: type ContaXFiltro = {
+76:   id: string;
+77:   nome: string;
+78:   usuario: string;
+79:   oficial: boolean;
+80:   confiabilidade: number;
+81:   ativo: boolean;
+82: };
+83: 
+84: type Noticia = {
+85:   id: string;
+86:   titulo: string;
+87:   url: string;
+88:   resumo: string | null;
+89:   imagem_url: string | null;
+90:   categoria: string | null;
+91:   categorias: CategoriaResumo[];
+92:   oficial: boolean;
+93:   publicado_em: string | null;
+94:   coletado_em: string;
+95:   fonte_id: string;
+96:   fonte_nome: string;
+97:   fonte_slug: string;
+98:   fonte_confiabilidade: number;
+99: };
+100: 
+101: type VideoYoutube = {
+102:   id: string;
+103:   video_id: string;
+104:   titulo: string;
+105:   url: string;
+106:   thumbnail_url: string | null;
+107:   descricao: string | null;
+108:   tipo: "video" | "short" | "live";
+109:   publicado_em: string | null;
+110:   coletado_em: string;
+111:   metadados: Record<string, unknown>;
+112:   fonte_id: string;
+113:   fonte_nome: string;
+114:   fonte_slug: string;
+115:   fonte_oficial: boolean;
+116: };
+117: 
+118: type VideoStatus = {
+119:   total: number;
+120:   videos: number;
+121:   shorts: number;
+122:   lives: number;
+123:   ultima_coleta: string | null;
+124:   job_habilitado: boolean;
+125:   intervalo_segundos: number;
+126:   itens_por_secao: number;
+127: };
+128: 
+129: const API_URL = "/backend";
+130: const PAGE_SIZE = 60;
+131: const X_PAGE_SIZE = 20;
+132: const YOUTUBE_PAGE_SIZE = 100;
+133: const FALLBACK_NEWS_IMAGE = "/central-do-galo-logo.png";
+134: 
+135: function usarLogoComoFallback(noticia: Noticia): boolean {
+136:   const imagem = noticia.imagem_url?.trim() ?? "";
+137: 
+138:   // O No Ataque é descoberto por índice externo e não fornece uma imagem oficial
+139:   // confiável para o nosso coletor. Enquanto isso, usamos a identidade do portal.
+140:   if (noticia.fonte_slug === "noataque-atletico") {
+141:     return true;
+142:   }
+143: 
+144:   if (!imagem) {
+145:     return true;
+146:   }
+147: 
+148:   // Rejeita o ícone genérico do Google News que pode ser confundido com thumbnail.
+149:   if (
+150:     imagem.includes("googleusercontent.com/J6_coFbogxhRI9iM864NL_liGXvsQp2AupsKei7z0cNNfDvGUmWUy20nuUhkREQyrpY4bEeIBuc")
+151:   ) {
+152:     return true;
+153:   }
+154: 
+155:   return false;
+156: }
+157: 
+158: declare global {
+159:   interface Window {
+160:     twttr?: {
+161:       widgets?: {
+162:         load: (element?: HTMLElement) => void;
+163:       };
+164:     };
+165:   }
+166: }
+167: 
+168: let xScriptPromise: Promise<void> | null = null;
+169: 
+170: function carregarScriptX(): Promise<void> {
+171:   if (typeof window === "undefined") return Promise.resolve();
+172:   if (window.twttr?.widgets) return Promise.resolve();
+173:   if (xScriptPromise) return xScriptPromise;
+174: 
+175:   xScriptPromise = new Promise<void>((resolve, reject) => {
+176:     let script = document.getElementById("x-wjs") as HTMLScriptElement | null;
+177: 
+178:     const aguardarWidgets = () => {
+179:       const inicio = Date.now();
+180:       const timer = window.setInterval(() => {
+181:         if (window.twttr?.widgets) {
+182:           window.clearInterval(timer);
+183:           resolve();
+184:           return;
+185:         }
+186: 
+187:         if (Date.now() - inicio > 8000) {
+188:           window.clearInterval(timer);
+189:           reject(new Error("widgets.js do X não ficou disponível."));
+190:         }
+191:       }, 120);
+192:     };
+193: 
+194:     if (!script) {
+195:       script = document.createElement("script");
+196:       script.id = "x-wjs";
+197:       script.src = "https://platform.x.com/widgets.js";
+198:       script.async = true;
+199:       script.charset = "utf-8";
+200:       document.body.appendChild(script);
+201:     }
+202: 
+203:     if (script.dataset.loaded === "true") {
+204:       aguardarWidgets();
+205:       return;
+206:     }
+207: 
+208:     script.addEventListener(
+209:       "load",
+210:       () => {
+211:         if (script) script.dataset.loaded = "true";
+212:         aguardarWidgets();
+213:       },
+214:       { once: true }
+215:     );
+216:     script.addEventListener("error", () => reject(new Error("Falha ao carregar widgets.js do X.")), {
+217:       once: true,
+218:     });
+219:   }).catch((error) => {
+220:     xScriptPromise = null;
+221:     throw error;
+222:   });
+223: 
+224:   return xScriptPromise!;
+225: }
+226: 
+227: function XPostFallback({ conta, post }: { conta: ContaXComPosts; post?: PostX }) {
+228:   const destino = post?.url ?? `https://x.com/${conta.usuario}`;
+229:   const mensagemSemPost =
+230:     conta.status_sync === "config_erro"
+231:       ? "A integração com a X API ainda não está configurada no servidor."
+232:       : conta.status_sync === "erro"
+233:         ? "A última sincronização desta conta falhou."
+234:         : conta.status_sync === "pendente"
+235:           ? "Aguardando a primeira sincronização desta conta."
+236:           : "Nenhuma publicação cacheada no momento.";
+237: 
+238:   return (
+239:     <a
+240:       className="x-post-fallback"
+241:       href={destino}
+242:       target="_blank"
+243:       rel="noopener noreferrer"
+244:     >
+245:       <div className="x-fallback-account">
+246:         {conta.foto_url ? (
+247:           <img src={conta.foto_url} alt="" referrerPolicy="no-referrer" />
+248:         ) : (
+249:           <div className="x-fallback-avatar">X</div>
+250:         )}
+251:         <div>
+252:           <strong>{conta.nome}</strong>
+253:           <span>@{conta.usuario}</span>
+254:         </div>
+255:       </div>
+256:       {post?.texto ? <p>{post.texto}</p> : <p>{mensagemSemPost}</p>}
+257:       <span className="x-fallback-link">

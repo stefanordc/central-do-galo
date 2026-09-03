@@ -1,0 +1,67 @@
+{
+  "name": "Central do Galo - Sincronizar X",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 60
+            }
+          ]
+        }
+      },
+      "id": "schedule-x-sync",
+      "name": "A cada 60 minutos",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CENTRAL_GALO_API_URL + '/api/x/sync' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Sync-Secret",
+              "value": "={{ $env.CENTRAL_GALO_X_SYNC_SECRET }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 600000
+        }
+      },
+      "id": "call-central-galo-api",
+      "name": "Sincronizar X no backend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [520, 300]
+    }
+  ],
+  "connections": {
+    "A cada 60 minutos": {
+      "main": [
+        [
+          {
+            "node": "Sincronizar X no backend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "central-do-galo-x-sync-v20",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

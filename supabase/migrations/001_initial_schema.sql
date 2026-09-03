@@ -1,0 +1,20 @@
+-- Schema inicial do Central do Galo.
+-- A migration equivalente já foi aplicada no projeto Supabase.
+
+-- Tabelas criadas:
+-- fontes
+-- noticias
+-- videos
+-- contas_x
+-- posts_x
+-- competicoes
+-- jogos
+-- jogadores
+-- estatisticas_jogadores
+-- assuntos
+-- noticias_assuntos
+-- videos_assuntos
+-- posts_x_assuntos
+--
+-- RLS está habilitado nas tabelas públicas e somente leitura foi liberada
+-- para anon/authenticated. Escritas ficam reservadas ao backend privilegiado.

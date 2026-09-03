@@ -1,0 +1,1 @@
+const fs = require('fs'); let c = fs.readFileSync('frontend/src/app/page.tsx', 'utf8'); let start = c.indexOf('abaAtiva === \'videos\''); let end = c.indexOf('abaAtiva === \'x\''); console.log(c.substring(start - 200, end + 800));

@@ -1,0 +1,13 @@
+grant select on table public.fontes to anon, authenticated;
+grant select on table public.noticias to anon, authenticated;
+grant select on table public.videos to anon, authenticated;
+grant select on table public.contas_x to anon, authenticated;
+grant select on table public.posts_x to anon, authenticated;
+grant select on table public.competicoes to anon, authenticated;
+grant select on table public.jogos to anon, authenticated;
+grant select on table public.jogadores to anon, authenticated;
+grant select on table public.estatisticas_jogadores to anon, authenticated;
+grant select on table public.assuntos to anon, authenticated;
+grant select on table public.noticias_assuntos to anon, authenticated;
+grant select on table public.videos_assuntos to anon, authenticated;
+grant select on table public.posts_x_assuntos to anon, authenticated;

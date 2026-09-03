@@ -1,0 +1,38 @@
+YOUTUBE:
+              <span>Execute a sincronização inicial do YouTube no backend.</span>
+            </div>
+          )}
+
+          {!erroVideos && (
+            <div className="youtube-home-grid">
+              <VideoShelf
+                titulo="Vídeos"
+                subtitulo="Vídeos recentes dos canais monitorados."
+                items={videosYoutube}
+                variant="video"
+                onPlay={reproduzirVideo}
+              />
+              <VideoShelf
+                titulo="Shorts"
+                subtitulo="Shorts recentes dos canais monitorados."
+                items={shortsYoutube}
+                variant="short"
+                onPlay={reproduzirVideo}
+              />
+              <VideoShelf
+                titulo="Transmissões"
+                subtitulo="Lives, estreias e transmissões recentes dos canais monitorados."
+                items={livesYoutube}
+                variant="live"
+                onPlay={reproduzirVideo}
+              />
+            </div>
+          )}
+        </>
+      )}
+
+      {secaoAtiva === "x" && (
+        <>
+          <section className="section-header x-section-header">
+
+X HEADER:

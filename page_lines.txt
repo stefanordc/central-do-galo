@@ -1,0 +1,1470 @@
+0: "use client";
+1: 
+2: import { FormEvent, useEffect, useRef, useState } from "react";
+3: 
+4: type CategoriaResumo = {
+5:   nome: string;
+6:   slug: string;
+7:   principal: boolean;
+8: };
+9: 
+10: type Categoria = {
+11:   id: string;
+12:   nome: string;
+13:   slug: string;
+14:   descricao: string | null;
+15:   ordem: number;
+16:   total_noticias: number;
+17: };
+18: 
+19: type Fonte = {
+20:   id: string;
+21:   nome: string;
+22:   slug: string;
+23:   tipo: string;
+24:   confiabilidade: number;
+25:   oficial: boolean;
+26:   ativo: boolean;
+27: };
+28: 
+29: type PostX = {
+30:   id: string;
+31:   post_id: string;
+32:   url: string;
+33:   texto: string | null;
+34:   publicado_em: string | null;
+35:   coletado_em: string;
+36:   metricas: Record<string, number>;
+37:   midia: Array<Record<string, unknown>>;
+38:   embed_html: string | null;
+39:   embed_status: string;
+40:   embed_atualizado_em: string | null;
+41: };
+42: 
+43: type PostXFeed = PostX & {
+44:   conta_id: string;
+45:   conta_nome: string;
+46:   conta_usuario: string;
+47:   conta_foto_url: string | null;
+48:   conta_oficial: boolean;
+49: };
+50: 
+51: type ContaXComPosts = {
+52:   id: string;
+53:   nome: string;
+54:   usuario: string;
+55:   foto_url: string | null;
+56:   oficial: boolean;
+57:   confiabilidade: number;
+58:   ultima_sincronizacao: string | null;
+59:   status_sync: string;
+60:   sync_erro: string | null;
+61:   posts: PostX[];
+62: };
+63: 
+64: type RadarXStatus = {
+65:   fonte: string;
+66:   token_configurado: boolean;
+67:   scraping_habilitado?: boolean;
+68:   job_backend_habilitado: boolean;
+69:   contas_ativas: number;
+70:   nunca_sincronizadas: number;
+71:   posts_total: number;
+72:   embeds_ok: number;
+73: };
+74: 
+75: type ContaXFiltro = {
+76:   id: string;
+77:   nome: string;
+78:   usuario: string;
+79:   oficial: boolean;
+80:   confiabilidade: number;
+81:   ativo: boolean;
+82: };
+83: 
+84: type Noticia = {
+85:   id: string;
+86:   titulo: string;
+87:   url: string;
+88:   resumo: string | null;
+89:   imagem_url: string | null;
+90:   categoria: string | null;
+91:   categorias: CategoriaResumo[];
+92:   oficial: boolean;
+93:   publicado_em: string | null;
+94:   coletado_em: string;
+95:   fonte_id: string;
+96:   fonte_nome: string;
+97:   fonte_slug: string;
+98:   fonte_confiabilidade: number;
+99: };
+100: 
+101: type VideoYoutube = {
+102:   id: string;
+103:   video_id: string;
+104:   titulo: string;
+105:   url: string;
+106:   thumbnail_url: string | null;
+107:   descricao: string | null;
+108:   tipo: "video" | "short" | "live";
+109:   publicado_em: string | null;
+110:   coletado_em: string;
+111:   metadados: Record<string, unknown>;
+112:   fonte_id: string;
+113:   fonte_nome: string;
+114:   fonte_slug: string;
+115:   fonte_oficial: boolean;
+116: };
+117: 
+118: type VideoStatus = {
+119:   total: number;
+120:   videos: number;
+121:   shorts: number;
+122:   lives: number;
+123:   ultima_coleta: string | null;
+124:   job_habilitado: boolean;
+125:   intervalo_segundos: number;
+126:   itens_por_secao: number;
+127: };
+128: 
+129: const API_URL = "/backend";
+130: const PAGE_SIZE = 60;
+131: const X_PAGE_SIZE = 20;
+132: const YOUTUBE_PAGE_SIZE = 100;
+133: const FALLBACK_NEWS_IMAGE = "/central-do-galo-logo.png";
+134: 
+135: function usarLogoComoFallback(noticia: Noticia): boolean {
+136:   const imagem = noticia.imagem_url?.trim() ?? "";
+137: 
+138:   // O No Ataque é descoberto por índice externo e não fornece uma imagem oficial
+139:   // confiável para o nosso coletor. Enquanto isso, usamos a identidade do portal.
+140:   if (noticia.fonte_slug === "noataque-atletico") {
+141:     return true;
+142:   }
+143: 
+144:   if (!imagem) {
+145:     return true;
+146:   }
+147: 
+148:   // Rejeita o ícone genérico do Google News que pode ser confundido com thumbnail.
+149:   if (
+150:     imagem.includes("googleusercontent.com/J6_coFbogxhRI9iM864NL_liGXvsQp2AupsKei7z0cNNfDvGUmWUy20nuUhkREQyrpY4bEeIBuc")
+151:   ) {
+152:     return true;
+153:   }
+154: 
+155:   return false;
+156: }
+157: 
+158: declare global {
+159:   interface Window {
+160:     twttr?: {
+161:       widgets?: {
+162:         load: (element?: HTMLElement) => void;
+163:       };
+164:     };
+165:   }
+166: }
+167: 
+168: let xScriptPromise: Promise<void> | null = null;
+169: 
+170: function carregarScriptX(): Promise<void> {
+171:   if (typeof window === "undefined") return Promise.resolve();
+172:   if (window.twttr?.widgets) return Promise.resolve();
+173:   if (xScriptPromise) return xScriptPromise;
+174: 
+175:   xScriptPromise = new Promise<void>((resolve, reject) => {
+176:     let script = document.getElementById("x-wjs") as HTMLScriptElement | null;
+177: 
+178:     const aguardarWidgets = () => {
+179:       const inicio = Date.now();
+180:       const timer = window.setInterval(() => {
+181:         if (window.twttr?.widgets) {
+182:           window.clearInterval(timer);
+183:           resolve();
+184:           return;
+185:         }
+186: 
+187:         if (Date.now() - inicio > 8000) {
+188:           window.clearInterval(timer);
+189:           reject(new Error("widgets.js do X não ficou disponível."));
+190:         }
+191:       }, 120);
+192:     };
+193: 
+194:     if (!script) {
+195:       script = document.createElement("script");
+196:       script.id = "x-wjs";
+197:       script.src = "https://platform.x.com/widgets.js";
+198:       script.async = true;
+199:       script.charset = "utf-8";
+200:       document.body.appendChild(script);
+201:     }
+202: 
+203:     if (script.dataset.loaded === "true") {
+204:       aguardarWidgets();
+205:       return;
+206:     }
+207: 
+208:     script.addEventListener(
+209:       "load",
+210:       () => {
+211:         if (script) script.dataset.loaded = "true";
+212:         aguardarWidgets();
+213:       },
+214:       { once: true }
+215:     );
+216:     script.addEventListener("error", () => reject(new Error("Falha ao carregar widgets.js do X.")), {
+217:       once: true,
+218:     });
+219:   }).catch((error) => {
+220:     xScriptPromise = null;
+221:     throw error;
+222:   });
+223: 
+224:   return xScriptPromise!;
+225: }
+226: 
+227: function XPostFallback({ conta, post }: { conta: ContaXComPosts; post?: PostX }) {
+228:   const destino = post?.url ?? `https://x.com/${conta.usuario}`;
+229:   const mensagemSemPost =
+230:     conta.status_sync === "config_erro"
+231:       ? "A integração com a X API ainda não está configurada no servidor."
+232:       : conta.status_sync === "erro"
+233:         ? "A última sincronização desta conta falhou."
+234:         : conta.status_sync === "pendente"
+235:           ? "Aguardando a primeira sincronização desta conta."
+236:           : "Nenhuma publicação cacheada no momento.";
+237: 
+238:   return (
+239:     <a
+240:       className="x-post-fallback"
+241:       href={destino}
+242:       target="_blank"
+243:       rel="noopener noreferrer"
+244:     >
+245:       <div className="x-fallback-account">
+246:         {conta.foto_url ? (
+247:           <img src={conta.foto_url} alt="" referrerPolicy="no-referrer" />
+248:         ) : (
+249:           <div className="x-fallback-avatar">X</div>
+250:         )}
+251:         <div>
+252:           <strong>{conta.nome}</strong>
+253:           <span>@{conta.usuario}</span>
+254:         </div>
+255:       </div>
+256:       {post?.texto ? <p>{post.texto}</p> : <p>{mensagemSemPost}</p>}
+257:       <span className="x-fallback-link">
+258:         {post ? "Abrir publicação no X ↗" : `Ver publicações de @${conta.usuario} no X ↗`}
+259:       </span>
+260:     </a>
+261:   );
+262: }
+263: 
+264: function XPostEmbed({ conta, post }: { conta: ContaXComPosts; post: PostX }) {
+265:   const ref = useRef<HTMLDivElement>(null);
+266:   const [status, setStatus] = useState<"carregando" | "ok" | "erro">(
+267:     post.embed_html && post.embed_status === "ok" ? "carregando" : "erro"
+268:   );
+269: 
+270:   useEffect(() => {
+271:     const container = ref.current;
+272:     if (!container || !post.embed_html || post.embed_status !== "ok") {
+273:       setStatus("erro");
+274:       return;
+275:     }
+276: 
+277:     let ativo = true;
+278:     let poll: number | undefined;
+279:     let limite: number | undefined;
+280: 
+281:     carregarScriptX()
+282:       .then(() => {
+283:         if (!ativo || !ref.current) return;
+284:         window.twttr?.widgets?.load(ref.current);
+285: 
+286:         poll = window.setInterval(() => {
+287:           if (!ativo || !ref.current) return;
+288:           const iframe = ref.current.querySelector("iframe");
+289:           if (iframe) {
+290:             if (poll) window.clearInterval(poll);
+291:             if (limite) window.clearTimeout(limite);
+292:             setStatus("ok");
+293:           }
+294:         }, 150);
+295: 
+296:         limite = window.setTimeout(() => {
+297:           if (poll) window.clearInterval(poll);
+298:           if (ativo) setStatus("erro");
+299:         }, 6500);
+300:       })
+301:       .catch(() => {
+302:         if (ativo) setStatus("erro");
+303:       });
+304: 
+305:     return () => {
+306:       ativo = false;
+307:       if (poll) window.clearInterval(poll);
+308:       if (limite) window.clearTimeout(limite);
+309:     };
+310:   }, [post.embed_html, post.embed_status, post.id]);
+311: 
+312:   if (status === "erro") {
+313:     return <XPostFallback conta={conta} post={post} />;
+314:   }
+315: 
+316:   return (
+317:     <div className="x-native-post-shell">
+318:       {status === "carregando" && <div className="x-post-loading">Carregando publicação...</div>}
+319:       <div
+320:         ref={ref}
+321:         className={status === "ok" ? "x-native-post rendered" : "x-native-post"}
+322:         dangerouslySetInnerHTML={{ __html: post.embed_html ?? "" }}
+323:       />
+324:     </div>
+325:   );
+326: }
+327: 
+328: function XAccountCard({ conta }: { conta: ContaXComPosts }) {
+329:   return (
+330:     <article className="x-account-card">
+331:       <a
+332:         className="x-account-card-header"
+333:         href={`https://x.com/${conta.usuario}`}
+334:         target="_blank"
+335:         rel="noopener noreferrer"
+336:       >
+337:         {conta.foto_url ? (
+338:           <img src={conta.foto_url} alt="" referrerPolicy="no-referrer" />
+339:         ) : (
+340:           <div className="x-account-avatar-placeholder">X</div>
+341:         )}
+342:         <div className="x-account-card-copy">
+343:           <strong>{conta.nome}</strong>
+344:           <span>@{conta.usuario}</span>
+345:         </div>
+346:         {conta.oficial && <span className="x-official-label">OFICIAL</span>}
+347:         <span className="x-open-arrow">↗</span>
+348:       </a>
+349: 
+350:       <div className="x-account-posts">
+351:         {conta.posts.length > 0 ? (
+352:           conta.posts.map((post, index) => (
+353:             <div className="x-post-item" key={post.id}>
+354:               <div className="x-post-item-heading">
+355:                 <span>PUBLICAÇÃO {index + 1}</span>
+356:                 <span>{index + 1}/{conta.posts.length}</span>
+357:               </div>
+358:               <XPostEmbed conta={conta} post={post} />
+359:             </div>
+360:           ))
+361:         ) : (
+362:           <XPostFallback conta={conta} />
+363:         )}
+364:       </div>
+365:     </article>
+366:   );
+367: }
+368: 
+369: function XMediaGallery({
+370:   midia,
+371:   postUrl,
+372: }: {
+373:   midia: Array<Record<string, unknown>>;
+374:   postUrl: string;
+375: }) {
+376:   const imagens = midia
+377:     .map((item) => ({
+378:       tipo: typeof item.type === "string" ? item.type : "",
+379:       url: typeof item.url === "string" ? item.url : "",
+380:     }))
+381:     .filter((item) =>
+382:       item.url && ["photo", "image", "video", "video_thumbnail"].includes(item.tipo)
+383:     )
+384:     .slice(0, 4);
+385: 
+386:   if (imagens.length === 0) return null;
+387: 
+388:   return (
+389:     <div className={`x-timeline-media x-timeline-media-${imagens.length}`}>
+390:       {imagens.map((imagem, index) => (
+391:         <a
+392:           href={postUrl}
+393:           target="_blank"
+394:           rel="noopener noreferrer"
+395:           className="x-timeline-media-item"
+396:           key={`${imagem.url}-${index}`}
+397:         >
+398:           <img
+399:             src={`/backend/api/x/media?url=${encodeURIComponent(imagem.url)}`}
+400:             alt="Imagem anexada à publicação no X"
+401:             loading="lazy"
+402:           />
+403:         </a>
+404:       ))}
+405:     </div>
+406:   );
+407: }
+408: 
+409: function formatarNumeroX(valor: number | undefined): string {
+410:   if (!valor || valor <= 0) return "";
+411:   return new Intl.NumberFormat("pt-BR", {
+412:     notation: "compact",
+413:     maximumFractionDigits: 1,
+414:   }).format(valor);
+415: }
+416: 
+417: function prepararEmbedXParaNovaAba(html: string): string {
+418:   return html.replace(/<a\b([^>]*)>/gi, (_match, atributos: string) => {
+419:     const semTarget = atributos
+420:       .replace(/\s+target=(?:"[^"]*"|\'[^\']*\'|[^\s>]+)/gi, "")
+421:       .replace(/\s+rel=(?:"[^"]*"|\'[^\']*\'|[^\s>]+)/gi, "");
+422:     return `<a${semTarget} target="_blank" rel="noopener noreferrer">`;
+423:   });
+424: }
+425: 
+426: function corpoDoOEmbedX(html: string | null): string | null {
+427:   if (!html) return null;
+428:   const match = html.match(/<p\b[^>]*>([\s\S]*?)<\/p>/i);
+429:   if (!match?.[1]) return null;
+430:   return prepararEmbedXParaNovaAba(match[1]);
+431: }
+432: 
+433: function XTimelineNativeEmbed({ post }: { post: PostXFeed }) {
+434:   const embedRef = useRef<HTMLDivElement>(null);
+435: 
+436:   useEffect(() => {
+437:     let ativo = true;
+438: 
+439:     carregarScriptX()
+440:       .then(() => {
+441:         if (!ativo || !embedRef.current) return;
+442: 
+443:         // Importante: depois que o widgets.js transforma o blockquote em iframe,
+444:         // este componente não atualiza estado. Assim o React não sobrescreve
+445:         // o DOM que passou a ser controlado pelo widget nativo do X.
+446:         window.requestAnimationFrame(() => {
+447:           if (!ativo || !embedRef.current) return;
+448:           window.twttr?.widgets?.load(embedRef.current);
+449:         });
+450:       })
+451:       .catch(() => {
+452:         // O HTML do oEmbed permanece como fallback quando o script do X falha.
+453:       });
+454: 
+455:     return () => {
+456:       ativo = false;
+457:     };
+458:   }, [post.id]);
+459: 
+460:   return (
+461:     <div
+462:       ref={embedRef}
+463:       className="x-timeline-native-embed"
+464:       dangerouslySetInnerHTML={{ __html: prepararEmbedXParaNovaAba(post.embed_html ?? "") }}
+465:     />
+466:   );
+467: }
+468: 
+469: function XTimelineEmbed({ post, ativado }: { post: PostXFeed; ativado: boolean }) {
+470:   if (!post.embed_html || post.embed_status !== "ok") {
+471:     if (post.texto) {
+472:       return <p className="x-timeline-text">{post.texto}</p>;
+473:     }
+474: 
+475:     return (
+476:       <p className="x-timeline-text x-timeline-text-muted">
+477:         Publicação disponível no X.
+478:       </p>
+479:     );
+480:   }
+481: 
+482:   if (!ativado) {
+483:     return (
+484:       <div className="x-timeline-embed-preview">
+485:         {post.texto ? <p>{post.texto}</p> : <p>Publicação disponível no X.</p>}
+486:         <span>Conteúdo visual será carregado em instantes.</span>
+487:       </div>
+488:     );
+489:   }
+490: 
+491:   return <XTimelineNativeEmbed post={post} />;
+492: }
+493: 
+494: function XTimelineItem({ post }: { post: PostXFeed }) {
+495:   const corpoHtml = corpoDoOEmbedX(post.embed_html);
+496: 
+497:   return (
+498:     <article className="x-timeline-item">
+499:       <div className="x-timeline-avatar-wrap" aria-hidden="true">
+500:         {post.conta_foto_url ? (
+501:           <img
+502:             className="x-timeline-avatar"
+503:             src={post.conta_foto_url}
+504:             alt=""
+505:             loading="lazy"
+506:             referrerPolicy="no-referrer"
+507:           />
+508:         ) : (
+509:           <div className="x-timeline-avatar x-timeline-avatar-placeholder">X</div>
+510:         )}
+511:       </div>
+512: 
+513:       <div className="x-timeline-card x-timeline-card-native">
+514:         <div className="x-timeline-meta-bar">
+515:           <div className="x-timeline-meta-author">
+516:             <strong>{post.conta_nome}</strong>
+517:             {post.conta_oficial && <span className="x-timeline-official">OFICIAL</span>}
+518:             <span>@{post.conta_usuario}</span>
+519:           </div>
+520:           <time dateTime={post.publicado_em ?? post.coletado_em}>
+521:             {formatarData(post.publicado_em, post.coletado_em)}
+522:           </time>
+523:         </div>
+524: 
+525:         <div className="x-timeline-content-cache">
+526:           {corpoHtml ? (
+527:             <div
+528:               className="x-timeline-text x-timeline-rich-text"
+529:               dangerouslySetInnerHTML={{ __html: corpoHtml }}
+530:             />
+531:           ) : post.texto ? (
+532:             <p className="x-timeline-text">{post.texto}</p>
+533:           ) : (
+534:             <p className="x-timeline-text x-timeline-text-muted">Publicação disponível no X.</p>
+535:           )}
+536: 
+537:           <XMediaGallery midia={post.midia} postUrl={post.url} />
+538:         </div>
+539: 
+540:         <div className="x-timeline-native-footer">
+541:           <a href={post.url} target="_blank" rel="noopener noreferrer">
+542:             Ver no X <span aria-hidden="true">↗</span>
+543:           </a>
+544:         </div>
+545:       </div>
+546:     </article>
+547:   );
+548: }
+549: 
+550: function formatarData(data: string | null, coletadoEm: string): string {
+551:   const valor = data ?? coletadoEm;
+552:   const date = new Date(valor);
+553: 
+554:   if (Number.isNaN(date.getTime())) {
+555:     return "Agora";
+556:   }
+557: 
+558:   return new Intl.DateTimeFormat("pt-BR", {
+559:     day: "2-digit",
+560:     month: "2-digit",
+561:     year: "numeric",
+562:     hour: "2-digit",
+563:     minute: "2-digit",
+564:   }).format(date);
+565: }
+566: 
+567: function formatarDuracaoVideo(valor: unknown): string | null {
+568:   if (typeof valor !== "number" || !Number.isFinite(valor) || valor <= 0) return null;
+569:   const total = Math.round(valor);
+570:   const horas = Math.floor(total / 3600);
+571:   const minutos = Math.floor((total % 3600) / 60);
+572:   const segundos = total % 60;
+573:   if (horas > 0) {
+574:     return `${horas}:${String(minutos).padStart(2, "0")}:${String(segundos).padStart(2, "0")}`;
+575:   }
+576:   return `${minutos}:${String(segundos).padStart(2, "0")}`;
+577: }
+578: 
+579: function rotuloLive(video: VideoYoutube): string {
+580:   const status = typeof video.metadados.live_status === "string" ? video.metadados.live_status : "";
+581:   if (status === "is_live") return "AO VIVO";
+582:   if (status === "is_upcoming") return "EM BREVE";
+583:   return "TRANSMISSÃO";
+584: }
+585: 
+586: function VideoCard({ video, onPlay }: { video: VideoYoutube; onPlay: (video: VideoYoutube) => void }) {
+587:   const duracao = formatarDuracaoVideo(video.metadados.duration);
+588:   const thumbnail = video.thumbnail_url || `https://i.ytimg.com/vi/${video.video_id}/hqdefault.jpg`;
+589:   const liveLabel = video.tipo === "live" ? rotuloLive(video) : null;
+590: 
+591:   return (
+592:     <article className={`youtube-card youtube-card-${video.tipo}`}>
+593:       <button
+594:         className="youtube-card-play"
+595:         type="button"
+596:         onClick={() => onPlay(video)}
+597:         aria-label={`Reproduzir ${video.titulo}`}
+598:       >
+599:         <span className="youtube-thumb-wrap">
+600:           <img src={thumbnail} alt="" loading="lazy" referrerPolicy="no-referrer" />
+601:           <span className="youtube-play-mark" aria-hidden="true">▶</span>
+602:           {duracao && video.tipo !== "live" && <span className="youtube-duration">{duracao}</span>}
+603:           {liveLabel && <span className="youtube-live-badge">{liveLabel}</span>}
+604:           {video.tipo === "short" && <span className="youtube-short-badge">SHORT</span>}
+605:         </span>
+606:         <span className="youtube-card-copy">
+607:           <strong>{video.titulo}</strong>
+608:           <span>{video.fonte_nome}</span>
+609:           {video.publicado_em && <time>{formatarData(video.publicado_em, video.coletado_em)}</time>}
+610:         </span>
+611:       </button>
+612:     </article>
+613:   );
+614: }
+615: 
+616: function VideoShelf({
+617:   titulo,
+618:   subtitulo,
+619:   items,
+620:   variant,
+621:   onPlay,
+622: }: {
+623:   titulo: string;
+624:   subtitulo: string;
+625:   items: VideoYoutube[];
+626:   variant: "video" | "short" | "live";
+627:   onPlay: (video: VideoYoutube) => void;
+628: }) {
+629:   if (items.length === 0) return null;
+630: 
+631:   return (
+632:     <section className={`youtube-shelf youtube-shelf-${variant}`}>
+633:       <div className="youtube-shelf-heading">
+634:         <div>
+635:           <h3>{titulo}</h3>
+636:           <p>{subtitulo}</p>
+637:         </div>
+638:         <span>{items.length} publicações</span>
+639:       </div>
+640:       <div className={`youtube-grid youtube-grid-${variant}`}>
+641:         {items.map((video) => <VideoCard video={video} onPlay={onPlay} key={video.id} />)}
+642:       </div>
+643:     </section>
+644:   );
+645: }
+646: 
+647: function YoutubePersistentPlayer({
+648:   video,
+649:   mini,
+650:   onClose,
+651:   onReturn,
+652: }: {
+653:   video: VideoYoutube | null;
+654:   mini: boolean;
+655:   onClose: () => void;
+656:   onReturn: () => void;
+657: }) {
+658:   if (!video) return null;
+659: 
+660:   return (
+661:     <section
+662:       id="youtube-player"
+663:       className={mini ? "youtube-player-shell mini" : "youtube-player-shell"}
+664:       aria-label="Player de vídeo"
+665:     >
+666:       <div className="youtube-player-topbar">
+667:         <div>
+668:           <span>{mini ? "Reproduzindo" : video.fonte_nome}</span>
+669:           <strong>{video.titulo}</strong>
+670:         </div>
+671:         <div className="youtube-player-actions">
+672:           {mini && (
+673:             <button type="button" onClick={onReturn} title="Voltar para Vídeos">
+674:               ↗
+675:             </button>
+676:           )}
+677:           <button type="button" onClick={onClose} title="Fechar vídeo" aria-label="Fechar vídeo">
+678:             ×
+679:           </button>
+680:         </div>
+681:       </div>
+682:       <div className="youtube-player-frame">
+683:         <iframe
+684:           key={video.video_id}
+685:           src={`${typeof video.metadados.embed_url === "string" ? video.metadados.embed_url : `https://www.youtube.com/embed/${video.video_id}`}?autoplay=1&playsinline=1&rel=0`}
+686:           title={video.titulo}
+687:           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+688:           referrerPolicy="strict-origin-when-cross-origin"
+689:           allowFullScreen
+690:         />
+691:       </div>
+692:     </section>
+693:   );
+694: }
+695: 
+696: export default function Home() {
+697:   const [noticias, setNoticias] = useState<Noticia[]>([]);
+698:   const [categorias, setCategorias] = useState<Categoria[]>([]);
+699:   const [fontesDisponiveis, setFontesDisponiveis] = useState<Fonte[]>([]);
+700:   const [fontesYoutube, setFontesYoutube] = useState<Fonte[]>([]);
+701:   const [categoriaSelecionada, setCategoriaSelecionada] = useState("");
+702:   const [fonteSelecionada, setFonteSelecionada] = useState("");
+703:   const [buscaDigitada, setBuscaDigitada] = useState("");
+704:   const [buscaAplicada, setBuscaAplicada] = useState("");
+705:   const [carregando, setCarregando] = useState(true);
+706:   const [carregandoMais, setCarregandoMais] = useState(false);
+707:   const [temMais, setTemMais] = useState(false);
+708:   const [erro, setErro] = useState<string | null>(null);
+709:   const [secaoAtiva, setSecaoAtiva] = useState<"noticias" | "videos" | "x">("noticias");
+710:   const [feedX, setFeedX] = useState<PostXFeed[]>([]);
+711:   const [statusX, setStatusX] = useState<RadarXStatus | null>(null);
+712:   const [carregandoX, setCarregandoX] = useState(false);
+713:   const [carregandoMaisX, setCarregandoMaisX] = useState(false);
+714:   const [temMaisX, setTemMaisX] = useState(false);
+715:   const [erroX, setErroX] = useState<string | null>(null);
+716:   const [perfisX, setPerfisX] = useState<ContaXFiltro[]>([]);
+717:   const [perfilSelecionadoX, setPerfilSelecionadoX] = useState("");
+718:   const [buscaDigitadaX, setBuscaDigitadaX] = useState("");
+719:   const [buscaAplicadaX, setBuscaAplicadaX] = useState("");
+720:   const [abaVideo, setAbaVideo] = useState<'video' | 'short' | 'live'>('video');  const [videosYoutube, setVideosYoutube] = useState<VideoYoutube[]>([]);
+721:   const [shortsYoutube, setShortsYoutube] = useState<VideoYoutube[]>([]);
+722:   const [livesYoutube, setLivesYoutube] = useState<VideoYoutube[]>([]);
+723:   const [statusVideos, setStatusVideos] = useState<VideoStatus | null>(null);
+724:   const [canalSelecionadoYoutube, setCanalSelecionadoYoutube] = useState("");
+725:   const [buscaDigitadaYoutube, setBuscaDigitadaYoutube] = useState("");
+726:   const [buscaAplicadaYoutube, setBuscaAplicadaYoutube] = useState("");
+727:   const [carregandoVideos, setCarregandoVideos] = useState(false);
+728:   const [erroVideos, setErroVideos] = useState<string | null>(null);
+729:   const [videoAtivo, setVideoAtivo] = useState<VideoYoutube | null>(null);
+730: 
+731:   async function carregarFiltros() {
+732:     try {
+733:       const [categoriasResponse, fontesResponse] = await Promise.all([
+734:         fetch(`${API_URL}/api/categorias`, { cache: "no-store" }),
+735:         fetch(`${API_URL}/api/fontes`, { cache: "no-store" }),
+736:       ]);
+737: 
+738:       if (categoriasResponse.ok) {
+739:         const data: Categoria[] = await categoriasResponse.json();
+740:         setCategorias(data);
+741:       }
+742: 
+743:       if (fontesResponse.ok) {
+744:         const data: Fonte[] = await fontesResponse.json();
+745:         setFontesDisponiveis(
+746:           data.filter((fonte) => fonte.tipo === "noticia" || fonte.tipo === "oficial")
+747:         );
+748:         setFontesYoutube(
+749:           data
+750:             .filter((fonte) => fonte.tipo === "youtube")
+751:             .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR", { sensitivity: "base" }))
+752:         );
+753:       }
+754:     } catch {
+755:       // A falha dos filtros não impede a listagem principal de notícias.
+756:     }
+757:   }
+758: 
+759:   async function carregarPerfisX() {
+760:     try {
+761:       const response = await fetch(`${API_URL}/api/x/contas`, { cache: "no-store" });
+762:       if (!response.ok) return;
+763:       const data: ContaXFiltro[] = await response.json();
+764:       setPerfisX(
+765:         data
+766:           .filter((conta) => conta.ativo)
+767:           .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR", { sensitivity: "base" }))
+768:       );
+769:     } catch {
+770:       // O filtro de perfis é auxiliar e não impede a timeline de carregar.
+771:     }
+772:   }
+773: 
+774:   async function carregarFeedX({ append = false }: { append?: boolean } = {}) {
+775:     if (append) {
+776:       setCarregandoMaisX(true);
+777:     } else {
+778:       setCarregandoX(true);
+779:     }
+780: 
+781:     try {
+782:       const offset = append ? feedX.length : 0;
+783:       const paramsX = new URLSearchParams({
+784:         limit: String(X_PAGE_SIZE),
+785:         offset: String(offset),
+786:       });
+787:       if (perfilSelecionadoX) paramsX.set("usuario", perfilSelecionadoX);
+788:       if (buscaAplicadaX.trim().length >= 2) paramsX.set("q", buscaAplicadaX.trim());
+789: 
+790:       const feedPromise = fetch(`${API_URL}/api/x/feed?${paramsX.toString()}`, {
+791:         cache: "no-store",
+792:       });
+793:       const statusPromise = append
+794:         ? Promise.resolve<Response | null>(null)
+795:         : fetch(`${API_URL}/api/x/status`, { cache: "no-store" });
+796: 
+797:       const [feedResponse, statusResponse] = await Promise.all([feedPromise, statusPromise]);
+798: 
+799:       if (!feedResponse.ok) {
+800:         throw new Error(`API da timeline respondeu ${feedResponse.status}`);
+801:       }
+802: 
+803:       const data: PostXFeed[] = await feedResponse.json();
+804:       setFeedX((atuais) => {
+805:         if (!append) return data;
+806:         const ids = new Set(atuais.map((post) => post.id));
+807:         return [...atuais, ...data.filter((post) => !ids.has(post.id))];
+808:       });
+809:       setTemMaisX(data.length === X_PAGE_SIZE);
+810: 
+811:       if (statusResponse?.ok) {
+812:         const statusData: RadarXStatus = await statusResponse.json();
+813:         setStatusX(statusData);
+814:       }
+815: 
+816:       setErroX(null);
+817:     } catch (error) {
+818:       const mensagem = error instanceof Error ? error.message : "Falha ao carregar a timeline do X";
+819:       setErroX(mensagem);
+820:     } finally {
+821:       setCarregandoX(false);
+822:       setCarregandoMaisX(false);
+823:     }
+824:   }
+825: 
+826:   async function carregarVideosYoutube() {
+827:     setCarregandoVideos(true);
+828:     try {
+829:       const tipos: Array<VideoYoutube["tipo"]> = ["video", "short", "live"];
+830:       const requests = tipos.map((tipo) => {
+831:         const params = new URLSearchParams({
+832:           tipo,
+833:           limit: String(YOUTUBE_PAGE_SIZE),
+834:           offset: "0",
+835:         });
+836:         if (canalSelecionadoYoutube) params.set("fonte", canalSelecionadoYoutube);
+837:         if (buscaAplicadaYoutube.trim().length >= 2) params.set("q", buscaAplicadaYoutube.trim());
+838:         return fetch(`${API_URL}/api/videos?${params.toString()}`, { cache: "no-store" });
+839:       });
+840: 
+841:       const [videosResponse, shortsResponse, livesResponse, statusResponse] = await Promise.all([
+842:         ...requests,
+843:         fetch(`${API_URL}/api/videos/status`, { cache: "no-store" }),
+844:       ]);
+845: 
+846:       const responses = [videosResponse, shortsResponse, livesResponse];
+847:       const falha = responses.find((response) => !response.ok);
+848:       if (falha) throw new Error(`API de vídeos respondeu ${falha.status}`);
+849: 
+850:       const [videosData, shortsData, livesData] = await Promise.all(
+851:         responses.map((response) => response.json() as Promise<VideoYoutube[]>)
+852:       );
+853:       setVideosYoutube(videosData);
+854:       setShortsYoutube(shortsData);
+855:       setLivesYoutube(livesData);
+856: 
+857:       if (statusResponse.ok) {
+858:         setStatusVideos(await statusResponse.json());
+859:       }
+860:       setErroVideos(null);
+861:     } catch (error) {
+862:       const mensagem = error instanceof Error ? error.message : "Falha ao carregar vídeos";
+863:       setErroVideos(mensagem);
+864:     } finally {
+865:       setCarregandoVideos(false);
+866:     }
+867:   }
+868: 
+869:   function reproduzirVideo(video: VideoYoutube) {
+870:     setVideoAtivo(video);
+871:     window.requestAnimationFrame(() => {
+872:       document.getElementById("youtube-player")?.scrollIntoView({ behavior: "smooth", block: "start" });
+873:     });
+874:   }
+875: 
+876:   function montarParametros(offset: number) {
+877:     const params = new URLSearchParams({
+878:       limit: String(PAGE_SIZE),
+879:       offset: String(offset),
+880:     });
+881:     if (categoriaSelecionada) params.set("categoria", categoriaSelecionada);
+882:     if (fonteSelecionada) params.set("fonte", fonteSelecionada);
+883:     if (buscaAplicada.trim().length >= 2) params.set("q", buscaAplicada.trim());
+884:     return params;
+885:   }
+886: 
+887:   async function carregarNoticias({ append = false }: { append?: boolean } = {}) {
+888:     if (append) {
+889:       setCarregandoMais(true);
+890:     } else {
+891:       setCarregando(true);
+892:     }
+893: 
+894:     try {
+895:       const offset = append ? noticias.length : 0;
+896:       const params = montarParametros(offset);
+897:       const response = await fetch(`${API_URL}/api/noticias?${params.toString()}`, {
+898:         cache: "no-store",
+899:       });
+900: 
+901:       if (!response.ok) {
+902:         throw new Error(`API respondeu ${response.status}`);
+903:       }
+904: 
+905:       const data: Noticia[] = await response.json();
+906:       setNoticias((atuais) => (append ? [...atuais, ...data] : data));
+907:       setTemMais(data.length === PAGE_SIZE);
+908:       setErro(null);
+909:     } catch (error) {
+910:       const mensagem = error instanceof Error ? error.message : "Falha ao acessar a API";
+911:       setErro(mensagem);
+912:     } finally {
+913:       setCarregando(false);
+914:       setCarregandoMais(false);
+915:     }
+916:   }
+917: 
+918:   useEffect(() => {
+919:     carregarFiltros();
+920:     carregarPerfisX();
+921:   }, []);
+922: 
+923:   useEffect(() => {
+924:     if (secaoAtiva !== "noticias") return;
+925: 
+926:     carregarNoticias();
+927:     const interval = window.setInterval(() => carregarNoticias(), 60_000);
+928:     return () => window.clearInterval(interval);
+929:   }, [categoriaSelecionada, fonteSelecionada, buscaAplicada, secaoAtiva]);
+930: 
+931:   useEffect(() => {
+932:     if (secaoAtiva !== "videos") return;
+933: 
+934:     carregarVideosYoutube();
+935:     const interval = window.setInterval(() => carregarVideosYoutube(), 300_000);
+936:     return () => window.clearInterval(interval);
+937:   }, [secaoAtiva, canalSelecionadoYoutube, buscaAplicadaYoutube]);
+938: 
+939:   useEffect(() => {
+940:     if (secaoAtiva !== "x") return;
+941:     setFeedX([]);
+942:     setTemMaisX(false);
+943:     carregarFeedX();
+944:   }, [secaoAtiva, perfilSelecionadoX, buscaAplicadaX]);
+945: 
+946:   const filtroAtivo = Boolean(categoriaSelecionada || fonteSelecionada || buscaAplicada);
+947: 
+948:   function limparFiltros() {
+949:     setCategoriaSelecionada("");
+950:     setFonteSelecionada("");
+951:     setBuscaDigitada("");
+952:     setBuscaAplicada("");
+953:   }
+954: 
+955:   function pesquisar(event: FormEvent<HTMLFormElement>) {
+956:     event.preventDefault();
+957:     const valor = buscaDigitada.trim();
+958:     setBuscaAplicada(valor.length >= 2 ? valor : "");
+959:   }
+960: 
+961:   function pesquisarYoutube(event: FormEvent<HTMLFormElement>) {
+962:     event.preventDefault();
+963:     const valor = buscaDigitadaYoutube.trim();
+964:     setBuscaAplicadaYoutube(valor.length >= 2 ? valor : "");
+965:   }
+966: 
+967:   function pesquisarX(event: FormEvent<HTMLFormElement>) {
+968:     event.preventDefault();
+969:     const valor = buscaDigitadaX.trim();
+970:     setBuscaAplicadaX(valor.length >= 2 ? valor : "");
+971:   }
+972: 
+973:   return (
+974:     <main className="page-shell">
+975:       <header className="hero">
+976:         <div className="hero-copy">
+977:           <div className="brand-lockup">
+978:             <img
+979:               className="brand-logo"
+980:               src="/central-do-galo-logo.png"
+981:               alt="Central do Galo"
+982:             />
+983:             <div>
+984:               <p className="brand-name">Central do Galo</p>
+985:               <p className="brand-tagline">Notícias · Vídeos · X · Jogos · Dados</p>
+986:             </div>
+987:           </div>
+988:           <h1>Tudo sobre o Atlético em um só lugar.</h1>
+989:           <p className="subtitle">
+990:             Notícias reunidas de fontes selecionadas e confiáveis, sempre levando você à publicação original.
+991:           </p>
+992:         </div>
+993: 
+994:       </header>
+995: 
+996:       <nav className="menu">
+997:         <button
+998:           className={secaoAtiva === "noticias" ? "active" : ""}
+999:           onClick={() => setSecaoAtiva("noticias")}
+1000:         >
+1001:           Notícias
+1002:         </button>
+1003:         <button
+1004:           className={secaoAtiva === "videos" ? "active" : ""}
+1005:           onClick={() => setSecaoAtiva("videos")}
+1006:         >
+1007:           Vídeos
+1008:         </button>
+1009:         <button
+1010:           className={secaoAtiva === "x" ? "active" : ""}
+1011:           onClick={() => setSecaoAtiva("x")}
+1012:         >
+1013:           X
+1014:         </button>
+1015:         <button disabled>Jogos</button>
+1016:         <button disabled>Dados</button>
+1017:       </nav>
+1018: 
+1019:       <YoutubePersistentPlayer
+1020:         video={videoAtivo}
+1021:         mini={secaoAtiva !== "videos"}
+1022:         onClose={() => setVideoAtivo(null)}
+1023:         onReturn={() => setSecaoAtiva("videos")}
+1024:       />
+1025: 
+1026:       {secaoAtiva === "noticias" && (
+1027:         <>
+1028:       <section className="section-header">
+1029:         <div>
+1030:           <p className="eyebrow">RADAR DE NOTÍCIAS</p>
+1031:           <h2>Últimas do Galo</h2>
+1032:         </div>
+1033:         <button className="refresh-button" onClick={() => carregarNoticias()} disabled={carregando}>
+1034:           {carregando ? "Atualizando..." : "Atualizar"}
+1035:         </button>
+1036:       </section>
+1037: 
+1038:       <section className="filters-panel">
+1039:         <form className="search-form" onSubmit={pesquisar}>
+1040:           <label htmlFor="news-search" className="filter-label">
+1041:             Pesquisar no histórico
+1042:           </label>
+1043:           <div className="search-row">
+1044:             <input
+1045:               id="news-search"
+1046:               type="search"
+1047:               value={buscaDigitada}
+1048:               onChange={(event) => setBuscaDigitada(event.target.value)}
+1049:               placeholder="Ex.: Savinho, Fred, Arena MRV, Scarpa..."
+1050:             />
+1051:             <button type="submit">Pesquisar</button>
+1052:           </div>
+1053:         </form>
+1054: 
+1055:         <div className="filter-block">
+1056:           <span className="filter-label">Categoria</span>
+1057:           <div className="category-filters">
+1058:             <button
+1059:               className={!categoriaSelecionada ? "filter-chip active" : "filter-chip"}
+1060:               onClick={() => setCategoriaSelecionada("")}
+1061:             >
+1062:               Todas
+1063:             </button>
+1064: 
+1065:             {categorias.map((categoria) => (
+1066:               <button
+1067:                 key={categoria.id}
+1068:                 className={
+1069:                   categoriaSelecionada === categoria.slug ? "filter-chip active" : "filter-chip"
+1070:                 }
+1071:                 onClick={() => setCategoriaSelecionada(categoria.slug)}
+1072:                 title={categoria.descricao ?? categoria.nome}
+1073:               >
+1074:                 {categoria.nome}
+1075:                 <span>{categoria.total_noticias}</span>
+1076:               </button>
+1077:             ))}
+1078:           </div>
+1079:         </div>
+1080: 
+1081:         <div className="filter-source-row">
+1082:           <label>
+1083:             <span className="filter-label">Fonte</span>
+1084:             <select
+1085:               value={fonteSelecionada}
+1086:               onChange={(event) => setFonteSelecionada(event.target.value)}
+1087:             >
+1088:               <option value="">Todas as fontes</option>
+1089:               {fontesDisponiveis.map((fonte) => (
+1090:                 <option value={fonte.slug} key={fonte.id}>
+1091:                   {fonte.nome}
+1092:                 </option>
+1093:               ))}
+1094:             </select>
+1095:           </label>
+1096: 
+1097:           {filtroAtivo && (
+1098:             <button className="clear-filters" onClick={limparFiltros}>
+1099:               Limpar filtros
+1100:             </button>
+1101:           )}
+1102:         </div>
+1103: 
+1104:         {buscaAplicada && (
+1105:           <div className="active-search">
+1106:             Pesquisando por <strong>“{buscaAplicada}”</strong>
+1107:           </div>
+1108:         )}
+1109:       </section>
+1110: 
+1111:       {erro && (
+1112:         <div className="state-card error-card">
+1113:           <strong>O frontend não conseguiu acessar o backend.</strong>
+1114:           <span>
+1115:             Verifique se o FastAPI está rodando em {API_URL}. Detalhe: {erro}
+1116:           </span>
+1117:         </div>
+1118:       )}
+1119: 
+1120:       {!erro && carregando && noticias.length === 0 && (
+1121:         <div className="state-card">
+1122:           <strong>Carregando notícias...</strong>
+1123:         </div>
+1124:       )}
+1125: 
+1126:       {!erro && !carregando && noticias.length === 0 && (
+1127:         <div className="state-card">
+1128:           <strong>Nenhuma notícia encontrada.</strong>
+1129:           <span>Tente outra busca, categoria ou fonte.</span>
+1130:         </div>
+1131:       )}
+1132: 
+1133:       <section className="news-grid">
+1134:         {noticias.map((noticia) => {
+1135:           const categoriaPrincipal = noticia.categorias.find((categoria) => categoria.principal);
+1136:           const categoriasSecundarias = noticia.categorias.filter(
+1137:             (categoria) => !categoria.principal
+1138:           );
+1139: 
+1140:           return (
+1141:             <article
+1142:               className="news-card news-card-clickable"
+1143:               key={noticia.id}
+1144:               role="link"
+1145:               tabIndex={0}
+1146:               onClick={() => { window.location.href = `/noticias/${noticia.id}`; }}
+1147:               onKeyDown={(event) => {
+1148:                 if (event.key === "Enter" || event.key === " ") {
+1149:                   event.preventDefault();
+1150:                   window.location.href = `/noticias/${noticia.id}`;
+1151:                 }
+1152:               }}
+1153:             >
+1154:               {(() => {
+1155:                 const usarFallback = usarLogoComoFallback(noticia);
+1156: 
+1157:                 return (
+1158:                   <img
+1159:                     className={usarFallback ? "news-image fallback-logo" : "news-image"}
+1160:                     src={usarFallback ? FALLBACK_NEWS_IMAGE : noticia.imagem_url ?? FALLBACK_NEWS_IMAGE}
+1161:                     alt={usarFallback ? "Central do Galo" : ""}
+1162:                     loading="lazy"
+1163:                     referrerPolicy="no-referrer"
+1164:                     onError={(event) => {
+1165:                       event.currentTarget.onerror = null;
+1166:                       event.currentTarget.src = FALLBACK_NEWS_IMAGE;
+1167:                       event.currentTarget.alt = "Central do Galo";
+1168:                       event.currentTarget.classList.add("fallback-logo");
+1169:                     }}
+1170:                   />
+1171:                 );
+1172:               })()}
+1173: 
+1174:               <div className="news-body">
+1175:                 <div className="news-meta">
+1176:                   <span className="source-badge">{noticia.fonte_nome}</span>
+1177:                   {noticia.oficial && <span className="official-badge">OFICIAL</span>}
+1178:                   {categoriaPrincipal && (
+1179:                     <span className="category-badge primary-category">
+1180:                       {categoriaPrincipal.nome}
+1181:                     </span>
+1182:                   )}
+1183:                   {categoriasSecundarias.slice(0, 1).map((categoria) => (
+1184:                     <span className="category-badge" key={categoria.slug}>
+1185:                       {categoria.nome}
+1186:                     </span>
+1187:                   ))}
+1188:                 </div>
+1189: 
+1190:                 <h3>{noticia.titulo}</h3>
+1191: 
+1192:                 {noticia.resumo && <p className="news-summary">{noticia.resumo}</p>}
+1193: 
+1194:                 <div className="news-footer">
+1195:                   <time>{formatarData(noticia.publicado_em, noticia.coletado_em)}</time>
+1196:                   <a
+1197:                     href={noticia.url}
+1198:                     target="_blank"
+1199:                     rel="noopener noreferrer"
+1200:                     onClick={(event) => event.stopPropagation()}
+1201:                   >
+1202:                     Ler na fonte →
+1203:                   </a>
+1204:                 </div>
+1205:               </div>
+1206:             </article>
+1207:           );
+1208:         })}
+1209:       </section>
+1210: 
+1211:       {!erro && temMais && noticias.length > 0 && (
+1212:         <div className="load-more-wrap">
+1213:           <button
+1214:             className="load-more-button"
+1215:             onClick={() => carregarNoticias({ append: true })}
+1216:             disabled={carregandoMais}
+1217:           >
+1218:             {carregandoMais ? "Carregando..." : "Carregar mais notícias"}
+1219:           </button>
+1220:         </div>
+1221:       )}
+1222:         </>
+1223:       )}
+1224: 
+1225:       {secaoAtiva === "videos" && (
+1226:         <>
+1227:           <section className="section-header youtube-page-header">
+1228:             <div>
+1229:               <p className="eyebrow">GALOTV</p>
+1230:               <h2>Vídeos do Atlético</h2>
+1231:               <p className="youtube-page-copy">
+1232:                 Vídeos, Shorts e transmissões dos canais monitorados, reproduzidos sem sair do Central do Galo.
+1233:               </p>
+1234:             </div>
+1235:             <button
+1236:               className="refresh-button"
+1237:               type="button"
+1238:               onClick={() => carregarVideosYoutube()}
+1239:               disabled={carregandoVideos}
+1240:             >
+1241:               {carregandoVideos ? "Atualizando..." : "Atualizar"}
+1242:             </button>
+1243:           </section>
+1244: 
+1245:           <section className="youtube-filters-panel">
+1246:             <form className="search-form" onSubmit={pesquisarYoutube}>
+1247:               <label htmlFor="youtube-search" className="filter-label">Pesquisar vídeos</label>
+1248:               <div className="search-row">
+1249:                 <input
+1250:                   id="youtube-search"
+1251:                   type="search"
+1252:                   value={buscaDigitadaYoutube}
+1253:                   onChange={(event) => setBuscaDigitadaYoutube(event.target.value)}
+1254:                   placeholder="Ex.: Fred, bastidores, Galo, treino..."
+1255:                 />
+1256:                 <button type="submit">Pesquisar</button>
+1257:               </div>
+1258:             </form>
+1259: 
+1260:             <label className="youtube-channel-filter">
+1261:               <span className="filter-label">Canal</span>
+1262:               <select
+1263:                 value={canalSelecionadoYoutube}
+1264:                 onChange={(event) => setCanalSelecionadoYoutube(event.target.value)}
+1265:               >
+1266:                 <option value="">Todos os canais</option>
+1267:                 {fontesYoutube.map((fonte) => (
+1268:                   <option value={fonte.slug} key={fonte.id}>{fonte.nome}</option>
+1269:                 ))}
+1270:               </select>
+1271:             </label>
+1272: 
+1273:             {(canalSelecionadoYoutube || buscaAplicadaYoutube) && (
+1274:               <button
+1275:                 className="clear-filters"
+1276:                 type="button"
+1277:                 onClick={() => {
+1278:                   setCanalSelecionadoYoutube("");
+1279:                   setBuscaDigitadaYoutube("");
+1280:                   setBuscaAplicadaYoutube("");
+1281:                 }}
+1282:               >
+1283:                 Limpar filtros
+1284:               </button>
+1285:             )}
+1286:           </section>
+1287: 
+1288:           <div className="youtube-channel-strip">
+1289:             <div className="youtube-channel-mark">▶</div>
+1290:             <div>
+1291:               <strong>Central de vídeos do Galo</strong>
+1292:               <span>{fontesYoutube.length} canal(is) monitorado(s) · Vídeos, Shorts e transmissões</span>
+1293:             </div>
+1294:             {statusVideos?.ultima_coleta && (
+1295:               <time>Atualizado em {formatarData(statusVideos.ultima_coleta, statusVideos.ultima_coleta)}</time>
+1296:             )}
+1297:           </div>
+1298: 
+1299:           {erroVideos && (
+1300:             <div className="state-card error-card">
+1301:               <strong>Não foi possível carregar os vídeos.</strong>
+1302:               <span>Detalhe: {erroVideos}</span>
+1303:             </div>
+1304:           )}
+1305: 
+1306:           {!erroVideos && carregandoVideos && videosYoutube.length === 0 && shortsYoutube.length === 0 && livesYoutube.length === 0 && (
+1307:             <div className="state-card">
+1308:               <strong>Carregando GaloTV...</strong>
+1309:             </div>
+1310:           )}
+1311: 
+1312:           {!erroVideos && !carregandoVideos && videosYoutube.length === 0 && shortsYoutube.length === 0 && livesYoutube.length === 0 && (
+1313:             <div className="state-card">
+1314:               <strong>Ainda não há vídeos sincronizados.</strong>
+1315:               <span>Execute a sincronização inicial do YouTube no backend.</span>
+1316:             </div>
+1317:           )}
+1318: 
+1319:           {!erroVideos && (
+1320:             <div className="youtube-home-grid">
+1321:               <VideoShelf
+1322:                 titulo="Vídeos"
+1323:                 subtitulo="Vídeos recentes dos canais monitorados."
+1324:                 items={videosYoutube}
+1325:                 variant="video"
+1326:                 onPlay={reproduzirVideo}
+1327:               />
+1328:               <VideoShelf
+1329:                 titulo="Shorts"
+1330:                 subtitulo="Shorts recentes dos canais monitorados."
+1331:                 items={shortsYoutube}
+1332:                 variant="short"
+1333:                 onPlay={reproduzirVideo}
+1334:               />
+1335:               <VideoShelf
+1336:                 titulo="Transmissões"
+1337:                 subtitulo="Lives, estreias e transmissões recentes dos canais monitorados."
+1338:                 items={livesYoutube}
+1339:                 variant="live"
+1340:                 onPlay={reproduzirVideo}
+1341:               />
+1342:             </div>
+1343:           )}
+1344:         </>
+1345:       )}
+1346: 
+1347:       {secaoAtiva === "x" && (
+1348:         <>
+1349:           <section className="section-header x-section-header">
+1350:             <div>
+1351:               <p className="eyebrow">RADAR DO X</p>
+1352:               <h2>Últimas do X</h2>
+1353:               <p className="x-section-copy">
+1354:                 Uma timeline única com publicações dos perfis monitorados, ordenadas da mais recente para a
+1355:                 mais antiga. Exibimos 20 por vez.
+1356:               </p>
+1357:             </div>
+1358: 
+1359:             <div className="x-filter-stack">
+1360:               <form className="x-search-form" onSubmit={pesquisarX}>
+1361:                 <span className="filter-label">Pesquisar</span>
+1362:                 <div className="x-search-row">
+1363:                   <input
+1364:                     type="search"
+1365:                     value={buscaDigitadaX}
+1366:                     onChange={(event) => setBuscaDigitadaX(event.target.value)}
+1367:                     placeholder="Pesquisar publicações..."
+1368:                     aria-label="Pesquisar publicações do X"
+1369:                   />
+1370:                   <button type="submit">Pesquisar</button>
+1371:                 </div>
+1372:               </form>
+1373: 
+1374:               <label className="x-profile-filter">
+1375:                 <span className="filter-label">Perfil</span>
+1376:                 <select
+1377:                   value={perfilSelecionadoX}
+1378:                   onChange={(event) => setPerfilSelecionadoX(event.target.value)}
+1379:                   aria-label="Filtrar timeline por perfil do X"
+1380:                 >
+1381:                   <option value="">Todos os perfis</option>
+1382:                   {perfisX.map((conta) => (
+1383:                     <option value={conta.usuario} key={conta.id}>
+1384:                       {conta.nome} (@{conta.usuario})
+1385:                     </option>
+1386:                   ))}
+1387:                 </select>
+1388:               </label>
+1389: 
+1390:               {(perfilSelecionadoX || buscaAplicadaX) && (
+1391:                 <button
+1392:                   className="clear-filters x-clear-filters"
+1393:                   type="button"
+1394:                   onClick={() => {
+1395:                     setPerfilSelecionadoX("");
+1396:                     setBuscaDigitadaX("");
+1397:                     setBuscaAplicadaX("");
+1398:                   }}
+1399:                 >
+1400:                   Limpar filtros
+1401:                 </button>
+1402:               )}
+1403:             </div>
+1404:           </section>
+1405: 
+1406:           {erroX && (
+1407:             <div className="state-card error-card">
+1408:               <strong>Não foi possível carregar a timeline.</strong>
+1409:               <span>Verifique se o backend está rodando em {API_URL}. Detalhe: {erroX}</span>
+1410:             </div>
+1411:           )}
+1412: 
+1413:           {!erroX && statusX?.fonte === "x_api_v2" && !statusX.token_configurado && (
+1414:             <div className="state-card error-card">
+1415:               <strong>Integração oficial do X sem credencial.</strong>
+1416:               <span>A fonte oficial foi selecionada, mas o servidor não possui Bearer Token.</span>
+1417:             </div>
+1418:           )}
+1419: 
+1420:           {!erroX && statusX && statusX.posts_total === 0 && (
+1421:             <div className="state-card">
+1422:               <strong>Perfis configurados; aguardando a primeira coleta.</strong>
+1423:               <span>O Radar do X ainda não gravou publicações no cache.</span>
+1424:             </div>
+1425:           )}
+1426: 
+1427:           {!erroX && carregandoX && feedX.length === 0 && (
+1428:             <div className="state-card">
+1429:               <strong>Carregando timeline do X...</strong>
+1430:             </div>
+1431:           )}
+1432: 
+1433:           {!erroX && !carregandoX && feedX.length === 0 && statusX && statusX.posts_total > 0 && (
+1434:             <div className="state-card">
+1435:               <strong>Nenhuma publicação encontrada.</strong>
+1436:               <span>Altere a busca, escolha outro perfil ou volte para “Todos os perfis”.</span>
+1437:             </div>
+1438:           )}
+1439: 
+1440:           {!erroX && !carregandoX && feedX.length > 0 && (
+1441:             <>
+1442:               <section className="x-timeline-list" aria-label="Timeline de publicações do X">
+1443:                 {feedX.map((post) => (
+1444:                   <XTimelineItem post={post} key={post.id} />
+1445:                 ))}
+1446:               </section>
+1447: 
+1448:               <div className="x-timeline-load-more">
+1449:                 {temMaisX ? (
+1450:                   <button
+1451:                     className="load-more-button"
+1452:                     type="button"
+1453:                     onClick={() => carregarFeedX({ append: true })}
+1454:                     disabled={carregandoMaisX}
+1455:                   >
+1456:                     {carregandoMaisX ? "Carregando..." : "Carregar mais publicações"}
+1457:                   </button>
+1458:                 ) : (
+1459:                   <span>Você chegou ao fim das publicações armazenadas.</span>
+1460:                 )}
+1461:               </div>
+1462:             </>
+1463:           )}
+1464:         </>
+1465:       )}
+1466:     </main>
+1467:   );
+1468: }
+1469: 

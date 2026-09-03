@@ -1,0 +1,138 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useParams } from "next/navigation";
+
+type CategoriaResumo = {
+  nome: string;
+  slug: string;
+  principal: boolean;
+};
+
+type Noticia = {
+  id: string;
+  titulo: string;
+  url: string;
+  resumo: string | null;
+  imagem_url: string | null;
+  categoria: string | null;
+  categorias: CategoriaResumo[];
+  oficial: boolean;
+  publicado_em: string | null;
+  coletado_em: string;
+  fonte_id: string;
+  fonte_nome: string;
+  fonte_slug: string;
+  fonte_confiabilidade: number;
+};
+
+const API_URL = "/backend";
+const FALLBACK_IMAGE = "/central-do-galo-logo.png";
+
+function formatarData(data: string | null, coletadoEm: string): string {
+  const valor = data ?? coletadoEm;
+  const date = new Date(valor);
+  if (Number.isNaN(date.getTime())) return "Agora";
+  return new Intl.DateTimeFormat("pt-BR", {
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+export default function NoticiaPage() {
+  const params = useParams<{ id: string }>();
+  const [noticia, setNoticia] = useState<Noticia | null>(null);
+  const [erro, setErro] = useState<string | null>(null);
+
+  useEffect(() => {
+    const id = params?.id;
+    if (!id) return;
+
+    fetch(`${API_URL}/api/noticias/${encodeURIComponent(id)}`, { cache: "no-store" })
+      .then(async (response) => {
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body.detail ?? `API respondeu ${response.status}`);
+        return body as Noticia;
+      })
+      .then((data) => {
+        setNoticia(data);
+        setErro(null);
+      })
+      .catch((error) => setErro(error instanceof Error ? error.message : "Falha ao carregar a notícia."));
+  }, [params?.id]);
+
+  if (erro) {
+    return (
+      <main className="news-detail-shell">
+        <a className="public-page-brand" href="/">
+          <img src="/central-do-galo-logo.png" alt="Central do Galo" />
+          <span>Central do Galo</span>
+        </a>
+        <div className="state-card error-card news-detail-state">
+          <strong>Não foi possível abrir esta notícia.</strong>
+          <span>{erro}</span>
+        </div>
+      </main>
+    );
+  }
+
+  if (!noticia) {
+    return (
+      <main className="news-detail-shell">
+        <a className="public-page-brand" href="/">
+          <img src="/central-do-galo-logo.png" alt="Central do Galo" />
+          <span>Central do Galo</span>
+        </a>
+        <div className="state-card news-detail-state"><strong>Carregando notícia...</strong></div>
+      </main>
+    );
+  }
+
+  const imagem = noticia.imagem_url?.trim() || FALLBACK_IMAGE;
+
+  return (
+    <main className="news-detail-shell">
+      <a className="public-page-brand" href="/">
+        <img src="/central-do-galo-logo.png" alt="Central do Galo" />
+        <span>Central do Galo</span>
+      </a>
+
+      <article className="news-detail-card">
+        <div className="news-detail-meta">
+          <span className="source-badge">{noticia.fonte_nome}</span>
+          {noticia.oficial && <span className="official-badge">OFICIAL</span>}
+          {noticia.categorias.slice(0, 2).map((categoria) => (
+            <span className="category-badge" key={categoria.slug}>{categoria.nome}</span>
+          ))}
+        </div>
+
+        <h1>{noticia.titulo}</h1>
+        <time>{formatarData(noticia.publicado_em, noticia.coletado_em)}</time>
+
+        <img
+          className="news-detail-image"
+          src={imagem}
+          alt=""
+          referrerPolicy="no-referrer"
+          onError={(event) => {
+            event.currentTarget.onerror = null;
+            event.currentTarget.src = FALLBACK_IMAGE;
+          }}
+        />
+
+        {noticia.resumo && <p className="news-detail-summary">{noticia.resumo}</p>}
+
+        <div className="news-detail-source-box">
+          <div>
+            <strong>Publicação original</strong>
+            <span>O Central do Galo mantém a referência à fonte que publicou a matéria.</span>
+          </div>
+          <a href={noticia.url} target="_blank" rel="noopener noreferrer">Ler matéria completa ↗</a>
+        </div>
+      </article>
+    </main>
+  );
+}
