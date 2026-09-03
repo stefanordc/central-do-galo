@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import time
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -165,18 +166,34 @@ def _atualizar_status_lives(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not rows:
         return rows
 
-    video_ids = [str(row.get("video_id") or "") for row in rows]
+    indices_para_validar: list[int] = []
+    video_ids_para_validar: list[str] = []
 
-    with ThreadPoolExecutor(max_workers=min(4, len(video_ids))) as executor:
-        statuses = list(executor.map(_consultar_status_live_atual, video_ids))
+    for indice, row in enumerate(rows):
+        metadados = row.get("metadados")
+        if not isinstance(metadados, dict):
+            metadados = {}
+            row["metadados"] = metadados
 
-    for row, status_atual in zip(rows, statuses, strict=True):
-        if status_atual:
-            metadados = row.get("metadados")
-            if not isinstance(metadados, dict):
-                metadados = {}
-                row["metadados"] = metadados
+        status_salvo = str(metadados.get("live_status") or "")
 
+        # Transmissões já encerradas não precisam ser consultadas novamente.
+        # Validamos apenas lives ativas, futuras ou registros sem status.
+        if status_salvo != "was_live":
+            video_id = str(row.get("video_id") or "").strip()
+            if video_id:
+                indices_para_validar.append(indice)
+                video_ids_para_validar.append(video_id)
+
+    if video_ids_para_validar:
+        with ThreadPoolExecutor(max_workers=min(4, len(video_ids_para_validar))) as executor:
+            statuses = list(executor.map(_consultar_status_live_atual, video_ids_para_validar))
+
+        for indice, status_atual in zip(indices_para_validar, statuses, strict=True):
+            if not status_atual:
+                continue
+
+            metadados = rows[indice]["metadados"]
             metadados["live_status"] = status_atual
             metadados["live_status_verificado_em"] = datetime.now(UTC).isoformat()
 
@@ -220,6 +237,106 @@ def _status_live_card(duration_text: str, metadata_text: str) -> str:
 
 class YoutubeScrapeError(RuntimeError):
     pass
+
+
+def _normalizar_texto_filtro(valor: str) -> str:
+    normalizado = unicodedata.normalize("NFD", valor)
+    sem_acentos = "".join(
+        caractere
+        for caractere in normalizado
+        if unicodedata.category(caractere) != "Mn"
+    )
+    return sem_acentos.casefold()
+
+
+def _normalizar_lista_termos(termos: list[str]) -> list[str]:
+    return [
+        _normalizar_texto_filtro(termo.strip())
+        for termo in termos
+        if isinstance(termo, str) and termo.strip()
+    ]
+
+
+def _titulo_passa_no_filtro(
+    titulo: str,
+    termos_incluir: list[str],
+    termos_excluir: list[str],
+) -> bool:
+    titulo_normalizado = _normalizar_texto_filtro(titulo)
+    inclusoes = _normalizar_lista_termos(termos_incluir)
+    exclusoes = _normalizar_lista_termos(termos_excluir)
+
+    # A exclusão sempre tem prioridade.
+    if any(termo in titulo_normalizado for termo in exclusoes):
+        return False
+
+    if not inclusoes:
+        return True
+
+    return any(termo in titulo_normalizado for termo in inclusoes)
+
+
+def _filtrar_itens_por_termos(
+    items: list[dict[str, Any]],
+    termos_incluir: list[str],
+    termos_excluir: list[str],
+) -> list[dict[str, Any]]:
+    return [
+        item
+        for item in items
+        if _titulo_passa_no_filtro(
+            str(item.get("titulo") or ""),
+            termos_incluir,
+            termos_excluir,
+        )
+    ]
+
+
+def _desativar_videos_fora_do_filtro(
+    fonte_id: UUID,
+    termos_incluir: list[str],
+    termos_excluir: list[str],
+) -> int:
+    if not termos_incluir and not termos_excluir:
+        return 0
+
+    sql_select = """
+        select id, titulo
+        from public.videos
+        where fonte_id = %s
+          and ativo = true
+    """
+
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql_select, (fonte_id,))
+            rows = cur.fetchall()
+
+            ids_desativar: list[UUID] = []
+            for video_id, titulo in rows:
+                if not _titulo_passa_no_filtro(
+                    str(titulo or ""),
+                    termos_incluir,
+                    termos_excluir,
+                ):
+                    ids_desativar.append(video_id)
+
+            if not ids_desativar:
+                return 0
+
+            cur.execute(
+                """
+                update public.videos
+                set ativo = false
+                where id = any(%s)
+                """,
+                (ids_desativar,),
+            )
+            total = cur.rowcount
+
+        conn.commit()
+
+    return total
 
 
 def listar_fontes_youtube() -> list[dict]:
@@ -837,11 +954,38 @@ def sincronizar_youtube() -> dict:
                 if not isinstance(url, str) or not url.strip():
                     continue
 
+                filtro_termos = config.get("filtro_termos")
+                if not isinstance(filtro_termos, list):
+                    filtro_termos = []
+
+                filtro_excluir_termos = config.get("filtro_excluir_termos")
+                if not isinstance(filtro_excluir_termos, list):
+                    filtro_excluir_termos = []
+
+                if filtro_termos or filtro_excluir_termos:
+                    desativados = _desativar_videos_fora_do_filtro(
+                        fonte["id"],
+                        filtro_termos,
+                        filtro_excluir_termos,
+                    )
+                    if desativados:
+                        logger.info(
+                            "[YouTube] %s | desativados por filtro=%s",
+                            fonte["slug"],
+                            desativados,
+                        )
+
+                limite_coleta = settings.youtube_items_per_section
+                if filtro_termos or filtro_excluir_termos:
+                    # Canais generalistas precisam de uma varredura maior para
+                    # encontrarmos publicações específicas do Atlético.
+                    limite_coleta = max(settings.youtube_items_per_section * 6, 60)
+
                 try:
                     items = scraper.coletar_aba(
                         url.strip(),
                         tipo=tipo,
-                        limite=settings.youtube_items_per_section,
+                        limite=limite_coleta,
                         slug=fonte["slug"],
                     )
                 except Exception as exc:
@@ -850,6 +994,25 @@ def sincronizar_youtube() -> dict:
                     continue
 
                 total_processados += len(items)
+
+                if filtro_termos or filtro_excluir_termos:
+                    total_antes_filtro = len(items)
+                    items = _filtrar_itens_por_termos(
+                        items,
+                        filtro_termos,
+                        filtro_excluir_termos,
+                    )
+                    items = items[:settings.youtube_items_per_section]
+                    logger.info(
+                        "[YouTube] %s | %s | incluir=%s | excluir=%s | encontrados=%s | aceitos=%s",
+                        fonte["slug"],
+                        tipo,
+                        filtro_termos,
+                        filtro_excluir_termos,
+                        total_antes_filtro,
+                        len(items),
+                    )
+
                 for item in items:
                     salvar_video(fonte_id=fonte["id"], **item)
                     total_salvos += 1

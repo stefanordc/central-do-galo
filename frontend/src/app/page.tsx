@@ -130,7 +130,7 @@ type VideoStatus = {
 const API_URL = "/backend";
 const PAGE_SIZE = 60;
 const X_PAGE_SIZE = 20;
-const YOUTUBE_PAGE_SIZE = 10;
+const YOUTUBE_PAGE_SIZE = 13;
 const FALLBACK_NEWS_IMAGE = "/central-do-galo-logo.png";
 
 function usarLogoComoFallback(noticia: Noticia): boolean {
@@ -711,6 +711,7 @@ export default function Home() {
   const [noticias, setNoticias] = useState<Noticia[]>([]);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [fontesDisponiveis, setFontesDisponiveis] = useState<Fonte[]>([]);
+  const [canaisYoutubeDisponiveis, setCanaisYoutubeDisponiveis] = useState<Fonte[]>([]);
   const [categoriaSelecionada, setCategoriaSelecionada] = useState("");
   const [fonteSelecionada, setFonteSelecionada] = useState("");
   const [buscaDigitada, setBuscaDigitada] = useState("");
@@ -753,8 +754,15 @@ export default function Home() {
 
       if (fontesResponse.ok) {
         const data: Fonte[] = await fontesResponse.json();
+
         setFontesDisponiveis(
           data.filter((fonte) => fonte.tipo === "noticia" || fonte.tipo === "oficial")
+        );
+
+        setCanaisYoutubeDisponiveis(
+          data
+            .filter((fonte) => fonte.tipo === "youtube" && fonte.ativo)
+            .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR", { sensitivity: "base" }))
         );
       }
     } catch {
@@ -829,25 +837,48 @@ export default function Home() {
   }
 
   async function carregarVideosYoutube() {
+    if (canaisYoutubeDisponiveis.length === 0) {
+      return;
+    }
+
     setCarregandoVideos(true);
+
     try {
-      const tipos: Array<VideoYoutube["tipo"]> = ["video", "short", "live"];
-      const [videosResponse, shortsResponse, livesResponse, statusResponse] = await Promise.all([
-        ...tipos.map((tipo) =>
-          fetch(`${API_URL}/api/videos?tipo=${tipo}&limit=${YOUTUBE_PAGE_SIZE}&offset=0`, {
-            cache: "no-store",
-          })
-        ),
+      const carregarTipoPorCanal = async (tipo: VideoYoutube["tipo"]) => {
+        const responses = await Promise.all(
+          canaisYoutubeDisponiveis.map((fonte) =>
+            fetch(
+              `${API_URL}/api/videos?tipo=${tipo}&limit=${YOUTUBE_PAGE_SIZE}&offset=0&fonte=${encodeURIComponent(fonte.slug)}`,
+              { cache: "no-store" }
+            )
+          )
+        );
+
+        const falha = responses.find((response) => !response.ok);
+        if (falha) {
+          throw new Error(`API de vídeos respondeu ${falha.status}`);
+        }
+
+        const blocos = await Promise.all(
+          responses.map((response) => response.json() as Promise<VideoYoutube[]>)
+        );
+
+        return blocos
+          .flat()
+          .sort((a, b) => {
+            const dataA = new Date(a.publicado_em ?? a.coletado_em).getTime();
+            const dataB = new Date(b.publicado_em ?? b.coletado_em).getTime();
+            return dataB - dataA;
+          });
+      };
+
+      const [videosData, shortsData, livesData, statusResponse] = await Promise.all([
+        carregarTipoPorCanal("video"),
+        carregarTipoPorCanal("short"),
+        carregarTipoPorCanal("live"),
         fetch(`${API_URL}/api/videos/status`, { cache: "no-store" }),
       ]);
 
-      const responses = [videosResponse, shortsResponse, livesResponse];
-      const falha = responses.find((response) => !response.ok);
-      if (falha) throw new Error(`API de vídeos respondeu ${falha.status}`);
-
-      const [videosData, shortsData, livesData] = await Promise.all(
-        responses.map((response) => response.json() as Promise<VideoYoutube[]>)
-      );
       setVideosYoutube(videosData);
       setShortsYoutube(shortsData);
       setLivesYoutube(livesData);
@@ -855,6 +886,7 @@ export default function Home() {
       if (statusResponse.ok) {
         setStatusVideos(await statusResponse.json());
       }
+
       setErroVideos(null);
     } catch (error) {
       const mensagem = error instanceof Error ? error.message : "Falha ao carregar vídeos";
@@ -927,12 +959,12 @@ export default function Home() {
   }, [categoriaSelecionada, fonteSelecionada, buscaAplicada, secaoAtiva]);
 
   useEffect(() => {
-    if (secaoAtiva !== "videos") return;
+    if (secaoAtiva !== "videos" || canaisYoutubeDisponiveis.length === 0) return;
 
     carregarVideosYoutube();
     const interval = window.setInterval(() => carregarVideosYoutube(), 60_000);
     return () => window.clearInterval(interval);
-  }, [secaoAtiva]);
+  }, [secaoAtiva, canaisYoutubeDisponiveis]);
 
   useEffect(() => {
     if (secaoAtiva !== "x") return;
@@ -986,7 +1018,7 @@ export default function Home() {
   const configuracaoFiltroVideos = {
     video: {
       titulo: "Vídeos",
-      subtitulo: "Os 10 vídeos mais recentes do canal.",
+      subtitulo: "Os 13 vídeos mais recentes de cada canal.",
       items: videosYoutubeFiltrados,
       totalOriginal: videosYoutube.length,
       variant: "video" as const,
@@ -1000,7 +1032,7 @@ export default function Home() {
     },
     live: {
       titulo: "Ao Vivo",
-      subtitulo: "Transmissões ao vivo, agendadas e recentes.",
+      subtitulo: "Ao vivo agora, próximas transmissões e histórico recente.",
       items: livesYoutubeFiltrados,
       totalOriginal: livesYoutube.length,
       variant: "live" as const,
