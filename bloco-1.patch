@@ -1,0 +1,319 @@
+diff --git a/backend/app/api/routes/admin.py b/backend/app/api/routes/admin.py
+--- a/backend/app/api/routes/admin.py
++++ b/backend/app/api/routes/admin.py
+@@
+ from app.services.admin_service import (
+     criar_conta_x,
+     criar_pagina,
+     listar_contas_x_admin,
+     listar_paginas_admin,
+ )
++from app.services.source_service import criar_canal_youtube, listar_canais_youtube_admin
+@@
+ class ContaXCreateIn(BaseModel):
+@@
+     confiabilidade: int = Field(default=80, ge=0, le=100)
++
++
++class CanalYoutubeCreateIn(BaseModel):
++    nome: str = Field(min_length=2, max_length=160)
++    url: str = Field(min_length=1, max_length=500)
++    oficial: bool = False
++    confiabilidade: int = Field(default=80, ge=0, le=100)
+@@
+ def post_conta_x_admin(
+@@
+     except UniqueViolation as exc:
+         raise HTTPException(status_code=409, detail="Esse perfil do X já está cadastrado.") from exc
++
++
++@router.get("/youtube/canais")
++def get_canais_youtube_admin(authorization: str | None = Header(default=None)) -> list[dict]:
++    _validar_admin(authorization)
++    return listar_canais_youtube_admin()
++
++
++@router.post("/youtube/canais", status_code=status.HTTP_201_CREATED)
++def post_canal_youtube_admin(
++    payload: CanalYoutubeCreateIn,
++    authorization: str | None = Header(default=None),
++) -> dict:
++    _validar_admin(authorization)
++    try:
++        return criar_canal_youtube(
++            nome=payload.nome,
++            url=payload.url,
++            oficial=payload.oficial,
++            confiabilidade=payload.confiabilidade,
++        )
++    except ValueError as exc:
++        raise HTTPException(status_code=400, detail=str(exc)) from exc
++    except UniqueViolation as exc:
++        raise HTTPException(status_code=409, detail="Esse canal do YouTube já está cadastrado.") from exc
+
+diff --git a/backend/app/services/source_service.py b/backend/app/services/source_service.py
+--- a/backend/app/services/source_service.py
++++ b/backend/app/services/source_service.py
+@@
++import re
++import unicodedata
++from urllib.parse import urlparse
++
+ from app.db.pool import pool
+@@
+ def listar_fontes() -> list[dict]:
+@@
+             colunas = [desc.name for desc in cur.description]
+             return [dict(zip(colunas, row, strict=True)) for row in cur.fetchall()]
++
++
++def _slugify(valor: str) -> str:
++    normalizado = unicodedata.normalize("NFD", valor)
++    sem_acentos = "".join(char for char in normalizado if unicodedata.category(char) != "Mn")
++    return re.sub(r"[^a-z0-9]+", "-", sem_acentos.lower()).strip("-")
++
++
++def _extrair_handle_youtube(url_ou_handle: str) -> str:
++    valor = url_ou_handle.strip()
++    if not valor:
++        raise ValueError("Informe a URL ou o @handle do canal.")
++
++    if valor.startswith("@"):
++        handle = valor
++    else:
++        if not re.match(r"^https?://", valor, flags=re.IGNORECASE):
++            valor = f"https://{valor}"
++        parsed = urlparse(valor)
++        if parsed.netloc.lower() not in {"youtube.com", "www.youtube.com", "m.youtube.com"}:
++            raise ValueError("Informe uma URL válida do YouTube.")
++        partes = [parte for parte in parsed.path.split("/") if parte]
++        handle = next((parte for parte in partes if parte.startswith("@")), "")
++
++    if not re.fullmatch(r"@[A-Za-z0-9._-]+", handle):
++        raise ValueError("Não foi possível identificar o @handle do canal do YouTube.")
++    return handle
++
++
++def listar_canais_youtube_admin() -> list[dict]:
++    sql = """
++        select
++            id,
++            nome,
++            slug,
++            url_base,
++            confiabilidade,
++            oficial,
++            ativo,
++            configuracao
++        from public.fontes
++        where tipo = 'youtube'
++        order by ativo desc, oficial desc, confiabilidade desc, nome asc
++    """
++    with pool.connection() as conn:
++        with conn.cursor() as cur:
++            cur.execute(sql)
++            colunas = [desc.name for desc in cur.description]
++            return [dict(zip(colunas, row, strict=True)) for row in cur.fetchall()]
++
++
++def criar_canal_youtube(*, nome: str, url: str, oficial: bool, confiabilidade: int) -> dict:
++    nome_limpo = nome.strip()
++    if len(nome_limpo) < 2:
++        raise ValueError("Informe o nome do canal.")
++
++    handle = _extrair_handle_youtube(url)
++    handle_sem_arroba = handle[1:]
++    slug = f"youtube-{_slugify(handle_sem_arroba)}"
++    url_base = f"https://www.youtube.com/{handle}"
++    configuracao = {
++        "handle": handle,
++        "plataforma": "youtube",
++        "videos_url": f"{url_base}/videos",
++        "shorts_url": f"{url_base}/shorts",
++        "streams_url": f"{url_base}/streams",
++    }
++
++    sql = """
++        insert into public.fontes (
++            nome,
++            slug,
++            tipo,
++            url_base,
++            confiabilidade,
++            oficial,
++            ativo,
++            configuracao
++        )
++        values (%s, %s, 'youtube', %s, %s, %s, true, %s::jsonb)
++        returning id, nome, slug, url_base, confiabilidade, oficial, ativo, configuracao
++    """
++
++    import json
++
++    with pool.connection() as conn:
++        with conn.cursor() as cur:
++            cur.execute(
++                sql,
++                (
++                    nome_limpo,
++                    slug,
++                    url_base,
++                    confiabilidade,
++                    oficial,
++                    json.dumps(configuracao, ensure_ascii=False),
++                ),
++            )
++            row = cur.fetchone()
++            colunas = [desc.name for desc in cur.description]
++        conn.commit()
++
++    return dict(zip(colunas, row, strict=True))
+
+diff --git a/frontend/src/app/admin/page.tsx b/frontend/src/app/admin/page.tsx
+--- a/frontend/src/app/admin/page.tsx
++++ b/frontend/src/app/admin/page.tsx
+@@
+ type ContaXAdmin = {
+@@
+   ultima_sincronizacao: string | null;
+ };
++
++type CanalYoutubeAdmin = {
++  id: string;
++  nome: string;
++  slug: string;
++  url_base: string;
++  confiabilidade: number;
++  oficial: boolean;
++  ativo: boolean;
++  configuracao: Record<string, unknown>;
++};
+@@
+   const [paginas, setPaginas] = useState<PaginaAdmin[]>([]);
+   const [contas, setContas] = useState<ContaXAdmin[]>([]);
++  const [canaisYoutube, setCanaisYoutube] = useState<CanalYoutubeAdmin[]>([]);
+@@
+   const [confiabilidadeX, setConfiabilidadeX] = useState(80);
++  const [nomeCanal, setNomeCanal] = useState("");
++  const [urlCanal, setUrlCanal] = useState("");
++  const [oficialCanal, setOficialCanal] = useState(false);
++  const [confiabilidadeCanal, setConfiabilidadeCanal] = useState(80);
+@@
+-    const [paginasResponse, contasResponse] = await Promise.all([
++    const [paginasResponse, contasResponse, canaisResponse] = await Promise.all([
+       fetch(`${API_URL}/api/admin/paginas`, { headers, cache: "no-store" }),
+       fetch(`${API_URL}/api/admin/x/contas`, { headers, cache: "no-store" }),
++      fetch(`${API_URL}/api/admin/youtube/canais`, { headers, cache: "no-store" }),
+     ]);
+ 
+-    if (paginasResponse.status === 401 || contasResponse.status === 401) {
++    if (paginasResponse.status === 401 || contasResponse.status === 401 || canaisResponse.status === 401) {
+@@
+     if (paginasResponse.ok) setPaginas(await paginasResponse.json());
+     if (contasResponse.ok) setContas(await contasResponse.json());
++    if (canaisResponse.ok) setCanaisYoutube(await canaisResponse.json());
+@@
+     setPaginas([]);
+     setContas([]);
++    setCanaisYoutube([]);
+@@
+   async function criarContaX(event: FormEvent<HTMLFormElement>) {
+@@
+     await carregarDados();
+   }
++
++  async function criarCanalYoutube(event: FormEvent<HTMLFormElement>) {
++    event.preventDefault();
++    setMensagem(null);
++    const response = await fetch(`${API_URL}/api/admin/youtube/canais`, {
++      method: "POST",
++      headers: { "Content-Type": "application/json", ...authHeaders },
++      body: JSON.stringify({
++        nome: nomeCanal,
++        url: urlCanal,
++        oficial: oficialCanal,
++        confiabilidade: confiabilidadeCanal,
++      }),
++    });
++    const body = await response.json().catch(() => ({}));
++    if (!response.ok) {
++      setMensagem(body.detail ?? "Não foi possível cadastrar o canal.");
++      return;
++    }
++    setNomeCanal("");
++    setUrlCanal("");
++    setOficialCanal(false);
++    setConfiabilidadeCanal(80);
++    setMensagem(`${body.nome} adicionado aos canais monitorados.`);
++    await carregarDados();
++  }
+@@
+-          <p>Entre para gerenciar páginas e perfis monitorados no X.</p>
++          <p>Entre para gerenciar páginas, perfis do X e canais do YouTube.</p>
+@@
+-          <p>Gerencie páginas públicas e os perfis usados pelo Radar do X.</p>
++          <p>Gerencie páginas públicas, perfis usados pelo Radar do X e canais monitorados no YouTube.</p>
+@@
+         <article className="admin-panel">
+@@
+         </article>
++        <article className="admin-panel">
++          <div className="admin-panel-heading">
++            <div>
++              <span className="eyebrow">YOUTUBE</span>
++              <h2>Novo canal</h2>
++            </div>
++            <span>{canaisYoutube.filter((canal) => canal.ativo).length} ativo(s)</span>
++          </div>
++          <form className="admin-form" onSubmit={criarCanalYoutube}>
++            <label>
++              Nome do canal
++              <input
++                value={nomeCanal}
++                onChange={(event) => setNomeCanal(event.target.value)}
++                placeholder="Ex.: Canal do Galo"
++                required
++              />
++            </label>
++            <label>
++              URL ou @handle do YouTube
++              <input
++                value={urlCanal}
++                onChange={(event) => setUrlCanal(event.target.value)}
++                placeholder="https://www.youtube.com/@canal/videos"
++                required
++              />
++            </label>
++            <label>
++              Confiabilidade
++              <input
++                type="number"
++                min={0}
++                max={100}
++                value={confiabilidadeCanal}
++                onChange={(event) => setConfiabilidadeCanal(Number(event.target.value))}
++              />
++            </label>
++            <label className="admin-check-row">
++              <input
++                type="checkbox"
++                checked={oficialCanal}
++                onChange={(event) => setOficialCanal(event.target.checked)}
++              />
++              Canal oficial
++            </label>
++            <button className="admin-primary-button" type="submit">Adicionar canal</button>
++          </form>
++          <div className="admin-list">
++            {canaisYoutube.map((canal) => (
++              <div className="admin-list-item" key={canal.id}>
++                <div>
++                  <strong>{canal.nome}</strong>
++                  <span>{canal.slug} · {canal.ativo ? "ativo" : "inativo"}</span>
++                </div>
++                <a href={canal.url_base} target="_blank" rel="noopener noreferrer">YouTube ↗</a>
++              </div>
++            ))}
++          </div>
++        </article>
+       </section>

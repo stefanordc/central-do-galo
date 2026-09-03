@@ -131,7 +131,6 @@ const API_URL = "/backend";
 const PAGE_SIZE = 60;
 const X_PAGE_SIZE = 20;
 const YOUTUBE_PAGE_SIZE = 10;
-const YOUTUBE_FONTE = "youtube-atletico";
 const FALLBACK_NEWS_IMAGE = "/central-do-galo-logo.png";
 
 function usarLogoComoFallback(noticia: Noticia): boolean {
@@ -589,6 +588,7 @@ function VideoCard({ video, onPlay }: { video: VideoYoutube; onPlay: (video: Vid
   const duracao = formatarDuracaoVideo(video.metadados.duration);
   const thumbnail = video.thumbnail_url || `https://i.ytimg.com/vi/${video.video_id}/hqdefault.jpg`;
   const liveLabel = video.tipo === "live" ? rotuloLive(video) : null;
+  const liveAgora = liveLabel === "AO VIVO";
 
   return (
     <article className={`youtube-card youtube-card-${video.tipo}`}>
@@ -602,7 +602,11 @@ function VideoCard({ video, onPlay }: { video: VideoYoutube; onPlay: (video: Vid
           <img src={thumbnail} alt="" loading="lazy" referrerPolicy="no-referrer" />
           <span className="youtube-play-mark" aria-hidden="true">▶</span>
           {duracao && video.tipo !== "live" && <span className="youtube-duration">{duracao}</span>}
-          {liveLabel && <span className="youtube-live-badge">{liveLabel}</span>}
+          {liveLabel && (
+            <span className={liveAgora ? "youtube-live-badge is-live-now" : "youtube-live-badge"}>
+              {liveLabel}
+            </span>
+          )}
           {video.tipo === "short" && <span className="youtube-short-badge">SHORT</span>}
         </span>
         <span className="youtube-card-copy">
@@ -695,6 +699,14 @@ function YoutubePersistentPlayer({
   );
 }
 
+function normalizarBusca(valor: string): string {
+  return valor
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
 export default function Home() {
   const [noticias, setNoticias] = useState<Noticia[]>([]);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
@@ -716,6 +728,9 @@ export default function Home() {
   const [erroX, setErroX] = useState<string | null>(null);
   const [perfisX, setPerfisX] = useState<ContaXFiltro[]>([]);
   const [perfilSelecionadoX, setPerfilSelecionadoX] = useState("");
+  const [buscaX, setBuscaX] = useState("");
+  const [buscaVideos, setBuscaVideos] = useState("");
+  const [filtroVideos, setFiltroVideos] = useState<"video" | "short" | "live">("video");
   const [videosYoutube, setVideosYoutube] = useState<VideoYoutube[]>([]);
   const [shortsYoutube, setShortsYoutube] = useState<VideoYoutube[]>([]);
   const [livesYoutube, setLivesYoutube] = useState<VideoYoutube[]>([]);
@@ -819,7 +834,7 @@ export default function Home() {
       const tipos: Array<VideoYoutube["tipo"]> = ["video", "short", "live"];
       const [videosResponse, shortsResponse, livesResponse, statusResponse] = await Promise.all([
         ...tipos.map((tipo) =>
-          fetch(`${API_URL}/api/videos?tipo=${tipo}&limit=${YOUTUBE_PAGE_SIZE}&offset=0&fonte=${encodeURIComponent(YOUTUBE_FONTE)}`, {
+          fetch(`${API_URL}/api/videos?tipo=${tipo}&limit=${YOUTUBE_PAGE_SIZE}&offset=0`, {
             cache: "no-store",
           })
         ),
@@ -915,7 +930,7 @@ export default function Home() {
     if (secaoAtiva !== "videos") return;
 
     carregarVideosYoutube();
-    const interval = window.setInterval(() => carregarVideosYoutube(), 300_000);
+    const interval = window.setInterval(() => carregarVideosYoutube(), 60_000);
     return () => window.clearInterval(interval);
   }, [secaoAtiva]);
 
@@ -940,6 +955,57 @@ export default function Home() {
     const valor = buscaDigitada.trim();
     setBuscaAplicada(valor.length >= 2 ? valor : "");
   }
+
+  const termoBuscaX = normalizarBusca(buscaX);
+  const feedXFiltrado = termoBuscaX
+    ? feedX.filter((post) =>
+        [
+          post.texto ?? "",
+          post.conta_nome,
+          post.conta_usuario,
+        ].some((valor) => normalizarBusca(valor).includes(termoBuscaX))
+      )
+    : feedX;
+
+  const termoBuscaVideos = normalizarBusca(buscaVideos);
+  const filtrarVideos = (items: VideoYoutube[]) =>
+    termoBuscaVideos
+      ? items.filter((video) =>
+          [
+            video.titulo,
+            video.descricao ?? "",
+            video.fonte_nome,
+          ].some((valor) => normalizarBusca(valor).includes(termoBuscaVideos))
+        )
+      : items;
+
+  const videosYoutubeFiltrados = filtrarVideos(videosYoutube);
+  const shortsYoutubeFiltrados = filtrarVideos(shortsYoutube);
+  const livesYoutubeFiltrados = filtrarVideos(livesYoutube);
+
+  const configuracaoFiltroVideos = {
+    video: {
+      titulo: "Vídeos",
+      subtitulo: "Os 10 vídeos mais recentes do canal.",
+      items: videosYoutubeFiltrados,
+      totalOriginal: videosYoutube.length,
+      variant: "video" as const,
+    },
+    short: {
+      titulo: "Reels",
+      subtitulo: "Conteúdo curto publicado pelo Atlético.",
+      items: shortsYoutubeFiltrados,
+      totalOriginal: shortsYoutube.length,
+      variant: "short" as const,
+    },
+    live: {
+      titulo: "Ao Vivo",
+      subtitulo: "Transmissões ao vivo, agendadas e recentes.",
+      items: livesYoutubeFiltrados,
+      totalOriginal: livesYoutube.length,
+      variant: "live" as const,
+    },
+  }[filtroVideos];
 
   return (
     <main className="page-shell">
@@ -1183,7 +1249,7 @@ export default function Home() {
               <p className="eyebrow">GALOTV</p>
               <h2>Vídeos do Atlético</h2>
               <p className="youtube-page-copy">
-                Vídeos, Shorts e transmissões do canal oficial, reproduzidos sem sair do Central do Galo.
+                Vídeos, Reels e transmissões dos canais monitorados, reproduzidos sem sair do Central do Galo.
               </p>
             </div>
             <button
@@ -1196,11 +1262,55 @@ export default function Home() {
             </button>
           </section>
 
+          <section className="filters-panel">
+            <div className="search-form">
+              <label htmlFor="video-search" className="filter-label">
+                Buscar vídeos
+              </label>
+              <div className="search-row">
+                <input
+                  id="video-search"
+                  type="search"
+                  value={buscaVideos}
+                  onChange={(event) => setBuscaVideos(event.target.value)}
+                  placeholder="Buscar por termo, jogador, treino..."
+                />
+              </div>
+            </div>
+
+            <div className="filter-block">
+              <span className="filter-label">Tipo</span>
+              <div className="category-filters" aria-label="Filtrar tipo de vídeo">
+                <button
+                  type="button"
+                  className={filtroVideos === "video" ? "filter-chip active" : "filter-chip"}
+                  onClick={() => setFiltroVideos("video")}
+                >
+                  Vídeos
+                </button>
+                <button
+                  type="button"
+                  className={filtroVideos === "short" ? "filter-chip active" : "filter-chip"}
+                  onClick={() => setFiltroVideos("short")}
+                >
+                  Reels
+                </button>
+                <button
+                  type="button"
+                  className={filtroVideos === "live" ? "filter-chip active" : "filter-chip"}
+                  onClick={() => setFiltroVideos("live")}
+                >
+                  Ao Vivo
+                </button>
+              </div>
+            </div>
+          </section>
+
           <div className="youtube-channel-strip">
             <div className="youtube-channel-mark">▶</div>
             <div>
-              <strong>GaloTV | Atlético</strong>
-              <span>@atletico · canal oficial</span>
+              <strong>Canais monitorados</strong>
+              <span>Conteúdo reunido automaticamente pela Central do Galo</span>
             </div>
             {statusVideos?.ultima_coleta && (
               <time>Atualizado em {formatarData(statusVideos.ultima_coleta, statusVideos.ultima_coleta)}</time>
@@ -1227,27 +1337,31 @@ export default function Home() {
             </div>
           )}
 
-          {!erroVideos && (
+          {!erroVideos &&
+            !carregandoVideos &&
+            configuracaoFiltroVideos.totalOriginal > 0 &&
+            configuracaoFiltroVideos.items.length === 0 && (
+              <div className="state-card">
+                <strong>Nenhum conteúdo encontrado.</strong>
+                <span>Tente outro termo de busca.</span>
+              </div>
+          )}
+
+          {!erroVideos &&
+            !carregandoVideos &&
+            configuracaoFiltroVideos.totalOriginal === 0 && (
+              <div className="state-card">
+                <strong>Nenhum conteúdo disponível nesta aba.</strong>
+              </div>
+          )}
+
+          {!erroVideos && configuracaoFiltroVideos.items.length > 0 && (
             <div className="youtube-home-grid">
               <VideoShelf
-                titulo="Vídeos"
-                subtitulo="Os 10 vídeos mais recentes do canal."
-                items={videosYoutube}
-                variant="video"
-                onPlay={reproduzirVideo}
-              />
-              <VideoShelf
-                titulo="Shorts"
-                subtitulo="Conteúdo curto publicado pelo Atlético."
-                items={shortsYoutube}
-                variant="short"
-                onPlay={reproduzirVideo}
-              />
-              <VideoShelf
-                titulo="Transmissões"
-                subtitulo="Lives, estreias e transmissões recentes."
-                items={livesYoutube}
-                variant="live"
+                titulo={configuracaoFiltroVideos.titulo}
+                subtitulo={configuracaoFiltroVideos.subtitulo}
+                items={configuracaoFiltroVideos.items}
+                variant={configuracaoFiltroVideos.variant}
                 onPlay={reproduzirVideo}
               />
             </div>
@@ -1265,6 +1379,17 @@ export default function Home() {
                 Uma timeline única com publicações dos perfis monitorados, ordenadas da mais recente para a
                 mais antiga. Exibimos 20 por vez.
               </p>
+            </div>
+
+            <div className="x-profile-filter">
+              <span className="filter-label">Buscar</span>
+              <input
+                type="search"
+                value={buscaX}
+                onChange={(event) => setBuscaX(event.target.value)}
+                placeholder="Buscar por termo, jogador, treino..."
+                aria-label="Buscar publicações no X"
+              />
             </div>
 
             <label className="x-profile-filter">
@@ -1318,10 +1443,21 @@ export default function Home() {
             </div>
           )}
 
-          {!erroX && !carregandoX && feedX.length > 0 && (
+          {!erroX &&
+            !carregandoX &&
+            feedX.length > 0 &&
+            Boolean(buscaX.trim()) &&
+            feedXFiltrado.length === 0 && (
+              <div className="state-card">
+                <strong>Nenhuma publicação encontrada.</strong>
+                <span>Tente outro termo de busca.</span>
+              </div>
+          )}
+
+          {!erroX && !carregandoX && feedXFiltrado.length > 0 && (
             <>
               <section className="x-timeline-list" aria-label="Timeline de publicações do X">
-                {feedX.map((post) => (
+                {feedXFiltrado.map((post) => (
                   <XTimelineItem post={post} key={post.id} />
                 ))}
               </section>
@@ -1344,6 +1480,25 @@ export default function Home() {
           )}
         </>
       )}
+
+      <style jsx global>{`
+        .youtube-live-badge.is-live-now {
+          background: #15803d !important;
+          color: #ffffff !important;
+          border-color: #15803d !important;
+          animation: central-galo-live-pulse 1.8s ease-in-out infinite;
+        }
+
+        @keyframes central-galo-live-pulse {
+          0%,
+          100% {
+            box-shadow: 0 0 0 0 rgba(21, 128, 61, 0.35);
+          }
+          50% {
+            box-shadow: 0 0 0 7px rgba(21, 128, 61, 0);
+          }
+        }
+      `}</style>
     </main>
   );
 }

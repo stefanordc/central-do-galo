@@ -10,6 +10,10 @@ from app.services.admin_service import (
     listar_contas_x_admin,
     listar_paginas_admin,
 )
+from app.services.source_service import (
+    criar_canal_youtube,
+    listar_canais_youtube_admin,
+)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -34,6 +38,13 @@ class PaginaCreateIn(BaseModel):
 class ContaXCreateIn(BaseModel):
     nome: str = Field(default="", max_length=160)
     usuario: str = Field(min_length=1, max_length=200)
+    oficial: bool = False
+    confiabilidade: int = Field(default=80, ge=0, le=100)
+
+
+class CanalYoutubeCreateIn(BaseModel):
+    nome: str = Field(min_length=2, max_length=160)
+    url: str = Field(min_length=1, max_length=500)
     oficial: bool = False
     confiabilidade: int = Field(default=80, ge=0, le=100)
 
@@ -104,3 +115,28 @@ def post_conta_x_admin(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except UniqueViolation as exc:
         raise HTTPException(status_code=409, detail="Esse perfil do X já está cadastrado.") from exc
+
+
+@router.get("/youtube/canais")
+def get_canais_youtube_admin(authorization: str | None = Header(default=None)) -> list[dict]:
+    _validar_admin(authorization)
+    return listar_canais_youtube_admin()
+
+
+@router.post("/youtube/canais", status_code=status.HTTP_201_CREATED)
+def post_canal_youtube_admin(
+    payload: CanalYoutubeCreateIn,
+    authorization: str | None = Header(default=None),
+) -> dict:
+    _validar_admin(authorization)
+    try:
+        return criar_canal_youtube(
+            nome=payload.nome,
+            url=payload.url,
+            oficial=payload.oficial,
+            confiabilidade=payload.confiabilidade,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except UniqueViolation as exc:
+        raise HTTPException(status_code=409, detail="Esse canal do YouTube já está cadastrado.") from exc

@@ -25,6 +25,23 @@ type ContaXAdmin = {
   ultima_sincronizacao: string | null;
 };
 
+type CanalYoutubeAdmin = {
+  id: string;
+  nome: string;
+  slug: string;
+  url_base: string;
+  confiabilidade: number;
+  oficial: boolean;
+  ativo: boolean;
+  configuracao: {
+    handle?: string;
+    plataforma?: string;
+    videos_url?: string;
+    shorts_url?: string;
+    streams_url?: string;
+  };
+};
+
 function slugify(valor: string): string {
   return valor
     .normalize("NFD")
@@ -32,6 +49,14 @@ function slugify(valor: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
+}
+
+function normalizarTexto(valor: string): string {
+  return valor
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
 }
 
 export default function AdminPage() {
@@ -42,6 +67,7 @@ export default function AdminPage() {
   const [carregandoLogin, setCarregandoLogin] = useState(false);
   const [paginas, setPaginas] = useState<PaginaAdmin[]>([]);
   const [contas, setContas] = useState<ContaXAdmin[]>([]);
+  const [canaisYoutube, setCanaisYoutube] = useState<CanalYoutubeAdmin[]>([]);
   const [mensagem, setMensagem] = useState<string | null>(null);
 
   const [tituloPagina, setTituloPagina] = useState("");
@@ -54,10 +80,34 @@ export default function AdminPage() {
   const [oficialX, setOficialX] = useState(false);
   const [confiabilidadeX, setConfiabilidadeX] = useState(80);
 
+  const [nomeYoutube, setNomeYoutube] = useState("");
+  const [urlYoutube, setUrlYoutube] = useState("");
+  const [oficialYoutube, setOficialYoutube] = useState(false);
+  const [confiabilidadeYoutube, setConfiabilidadeYoutube] = useState(80);
+
+  const [buscaCanal, setBuscaCanal] = useState("");
+  const [canalSelecionado, setCanalSelecionado] = useState("");
+
   const authHeaders = useMemo(
     () => (token ? { Authorization: `Bearer ${token}` } : {}),
     [token]
   );
+
+  const canaisYoutubeFiltrados = useMemo(() => {
+    const termo = normalizarTexto(buscaCanal);
+
+    return canaisYoutube.filter((canal) => {
+      const correspondeBusca =
+        !termo ||
+        normalizarTexto(canal.nome).includes(termo);
+
+      const correspondeDropdown =
+        !canalSelecionado ||
+        canal.id === canalSelecionado;
+
+      return correspondeBusca && correspondeDropdown;
+    });
+  }, [buscaCanal, canalSelecionado, canaisYoutube]);
 
   useEffect(() => {
     const salvo = window.sessionStorage.getItem("central_galo_admin_token") ?? "";
@@ -71,18 +121,24 @@ export default function AdminPage() {
 
   async function carregarDados() {
     const headers = { ...authHeaders };
-    const [paginasResponse, contasResponse] = await Promise.all([
+    const [paginasResponse, contasResponse, canaisYoutubeResponse] = await Promise.all([
       fetch(`${API_URL}/api/admin/paginas`, { headers, cache: "no-store" }),
       fetch(`${API_URL}/api/admin/x/contas`, { headers, cache: "no-store" }),
+      fetch(`${API_URL}/api/admin/youtube/canais`, { headers, cache: "no-store" }),
     ]);
 
-    if (paginasResponse.status === 401 || contasResponse.status === 401) {
+    if (
+      paginasResponse.status === 401 ||
+      contasResponse.status === 401 ||
+      canaisYoutubeResponse.status === 401
+    ) {
       sair();
       return;
     }
 
     if (paginasResponse.ok) setPaginas(await paginasResponse.json());
     if (contasResponse.ok) setContas(await contasResponse.json());
+    if (canaisYoutubeResponse.ok) setCanaisYoutube(await canaisYoutubeResponse.json());
   }
 
   async function entrar(event: FormEvent<HTMLFormElement>) {
@@ -113,6 +169,9 @@ export default function AdminPage() {
     setToken("");
     setPaginas([]);
     setContas([]);
+    setCanaisYoutube([]);
+    setBuscaCanal("");
+    setCanalSelecionado("");
   }
 
   async function criarPagina(event: FormEvent<HTMLFormElement>) {
@@ -167,6 +226,35 @@ export default function AdminPage() {
     await carregarDados();
   }
 
+  async function criarCanalYoutube(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setMensagem(null);
+
+    const response = await fetch(`${API_URL}/api/admin/youtube/canais`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders },
+      body: JSON.stringify({
+        nome: nomeYoutube,
+        url: urlYoutube,
+        oficial: oficialYoutube,
+        confiabilidade: confiabilidadeYoutube,
+      }),
+    });
+
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setMensagem(body.detail ?? "Não foi possível cadastrar o canal.");
+      return;
+    }
+
+    setNomeYoutube("");
+    setUrlYoutube("");
+    setOficialYoutube(false);
+    setConfiabilidadeYoutube(80);
+    setMensagem(`${body.nome} adicionado aos canais do YouTube.`);
+    await carregarDados();
+  }
+
   if (!token) {
     return (
       <main className="admin-shell admin-login-shell">
@@ -178,7 +266,7 @@ export default function AdminPage() {
               <h1>Admin</h1>
             </div>
           </div>
-          <p>Entre para gerenciar páginas e perfis monitorados no X.</p>
+          <p>Entre para gerenciar páginas, perfis do X e canais do YouTube.</p>
           <form className="admin-form" onSubmit={entrar}>
             <label>
               E-mail
@@ -204,7 +292,7 @@ export default function AdminPage() {
         <div>
           <span className="eyebrow">CENTRAL DO GALO</span>
           <h1>Painel administrativo</h1>
-          <p>Gerencie páginas públicas e os perfis usados pelo Radar do X.</p>
+          <p>Gerencie páginas públicas, perfis do Radar do X e canais do YouTube.</p>
         </div>
         <button className="admin-secondary-button" type="button" onClick={sair}>Sair</button>
       </header>
@@ -324,6 +412,118 @@ export default function AdminPage() {
                 <a href={`https://x.com/${conta.usuario}`} target="_blank" rel="noopener noreferrer">X ↗</a>
               </div>
             ))}
+          </div>
+        </article>
+
+        <article className="admin-panel">
+          <div className="admin-panel-heading">
+            <div>
+              <span className="eyebrow">YOUTUBE</span>
+              <h2>Novo canal</h2>
+            </div>
+            <span>{canaisYoutube.filter((canal) => canal.ativo).length} ativo(s)</span>
+          </div>
+
+          <form className="admin-form" onSubmit={criarCanalYoutube}>
+            <label>
+              Nome do canal
+              <input
+                value={nomeYoutube}
+                onChange={(e) => setNomeYoutube(e.target.value)}
+                placeholder="Ex.: Canal do Galo"
+                required
+              />
+            </label>
+
+            <label>
+              URL do canal
+              <input
+                type="url"
+                value={urlYoutube}
+                onChange={(e) => setUrlYoutube(e.target.value)}
+                placeholder="https://www.youtube.com/@canal/videos"
+                required
+              />
+            </label>
+
+            <label>
+              Confiabilidade
+              <input
+                type="number"
+                min={0}
+                max={100}
+                value={confiabilidadeYoutube}
+                onChange={(e) => setConfiabilidadeYoutube(Number(e.target.value))}
+              />
+            </label>
+
+            <label className="admin-check-row">
+              <input
+                type="checkbox"
+                checked={oficialYoutube}
+                onChange={(e) => setOficialYoutube(e.target.checked)}
+              />
+              Canal oficial
+            </label>
+
+            <button className="admin-primary-button" type="submit">Adicionar canal</button>
+          </form>
+
+          <div className="admin-form">
+            <label>
+              Buscar canal
+              <input
+                type="text"
+                value={buscaCanal}
+                onChange={(e) => setBuscaCanal(e.target.value)}
+                placeholder="Buscar canal..."
+              />
+            </label>
+
+            <label>
+              Selecionar canal
+              <select
+                value={canalSelecionado}
+                onChange={(e) => setCanalSelecionado(e.target.value)}
+              >
+                <option value="">Todos os canais</option>
+                {canaisYoutube.map((canal) => (
+                  <option key={canal.id} value={canal.id}>
+                    {canal.nome}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className="admin-list">
+            {canaisYoutubeFiltrados.map((canal) => (
+              <div className="admin-list-item" key={canal.id}>
+                <div>
+                  <strong>{canal.nome}</strong>
+                  <span>
+                    {canal.configuracao?.handle ?? canal.url_base}
+                    {canal.oficial ? " · oficial" : ""}
+                  </span>
+                </div>
+                <a
+                  href={canal.configuracao?.videos_url ?? `${canal.url_base}/videos`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  YouTube ↗
+                </a>
+              </div>
+            ))}
+
+            {canaisYoutubeFiltrados.length === 0 && (
+              <div className="admin-list-item">
+                <div>
+                  <strong>Nenhum canal encontrado.</strong>
+                  <span>Ajuste a busca ou selecione outro canal.</span>
+                </div>
+              </div>
+            )}
           </div>
         </article>
       </section>

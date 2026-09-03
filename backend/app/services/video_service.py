@@ -4,10 +4,12 @@ import json
 import logging
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
+from urllib.request import Request, urlopen
 from uuid import UUID
 
 from selenium.webdriver.support.ui import WebDriverWait
@@ -21,6 +23,199 @@ settings = get_settings()
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 TIPOS_VALIDOS = {"video", "short", "live"}
+
+
+LIVE_STATUS_CACHE_TTL_SECONDS = 60.0
+_LIVE_STATUS_CACHE: dict[str, tuple[float, str | None]] = {}
+
+
+def _extrair_objeto_json_html(html: str, marcador: str) -> dict[str, Any] | None:
+    indice_marcador = html.find(marcador)
+    if indice_marcador < 0:
+        return None
+
+    inicio = html.find("{", indice_marcador)
+    if inicio < 0:
+        return None
+
+    profundidade = 0
+    em_string = False
+    escape = False
+
+    for indice in range(inicio, len(html)):
+        caractere = html[indice]
+
+        if em_string:
+            if escape:
+                escape = False
+            elif caractere == "\\":
+                escape = True
+            elif caractere == '"':
+                em_string = False
+            continue
+
+        if caractere == '"':
+            em_string = True
+            continue
+
+        if caractere == "{":
+            profundidade += 1
+        elif caractere == "}":
+            profundidade -= 1
+            if profundidade == 0:
+                trecho = html[inicio:indice + 1]
+                try:
+                    valor = json.loads(trecho)
+                except json.JSONDecodeError:
+                    return None
+                return valor if isinstance(valor, dict) else None
+
+    return None
+
+
+def _status_live_player_response(player: dict[str, Any]) -> str | None:
+    video_details = player.get("videoDetails")
+    if not isinstance(video_details, dict):
+        video_details = {}
+
+    microformat = player.get("microformat")
+    if not isinstance(microformat, dict):
+        microformat = {}
+
+    renderer = microformat.get("playerMicroformatRenderer")
+    if not isinstance(renderer, dict):
+        renderer = {}
+
+    live_details = renderer.get("liveBroadcastDetails")
+    if not isinstance(live_details, dict):
+        live_details = {}
+
+    if live_details.get("isLiveNow") is True:
+        return "is_live"
+
+    agora = datetime.now(UTC)
+
+    inicio_texto = live_details.get("startTimestamp")
+    fim_texto = live_details.get("endTimestamp")
+
+    inicio: datetime | None = None
+    if isinstance(inicio_texto, str) and inicio_texto:
+        try:
+            inicio = datetime.fromisoformat(inicio_texto.replace("Z", "+00:00"))
+        except ValueError:
+            inicio = None
+
+    if inicio is not None and inicio > agora and not fim_texto:
+        return "is_upcoming"
+
+    playability = player.get("playabilityStatus")
+    if not isinstance(playability, dict):
+        playability = {}
+
+    reason = str(playability.get("reason") or "").lower()
+    if "will begin" in reason or "começará" in reason or "comecara" in reason:
+        return "is_upcoming"
+
+    if fim_texto:
+        return "was_live"
+
+    if video_details.get("isLiveContent") is True:
+        return "was_live"
+
+    return None
+
+
+def _consultar_status_live_atual(video_id: str) -> str | None:
+    agora_monotonic = time.monotonic()
+    cache = _LIVE_STATUS_CACHE.get(video_id)
+
+    if cache and agora_monotonic - cache[0] < LIVE_STATUS_CACHE_TTL_SECONDS:
+        return cache[1]
+
+    url = f"https://www.youtube.com/watch?v={video_id}"
+    request = Request(
+        url,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/152.0.0.0 Safari/537.36"
+            ),
+            "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+        },
+    )
+
+    status_atual: str | None = None
+
+    try:
+        with urlopen(request, timeout=5) as response:
+            html = response.read().decode("utf-8", errors="ignore")
+
+        player = _extrair_objeto_json_html(html, "ytInitialPlayerResponse")
+        if player is not None:
+            status_atual = _status_live_player_response(player)
+    except Exception as exc:
+        logger.debug("[YouTube] não foi possível validar live %s em tempo real: %s", video_id, exc)
+
+    _LIVE_STATUS_CACHE[video_id] = (agora_monotonic, status_atual)
+    return status_atual
+
+
+def _atualizar_status_lives(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not rows:
+        return rows
+
+    video_ids = [str(row.get("video_id") or "") for row in rows]
+
+    with ThreadPoolExecutor(max_workers=min(4, len(video_ids))) as executor:
+        statuses = list(executor.map(_consultar_status_live_atual, video_ids))
+
+    for row, status_atual in zip(rows, statuses, strict=True):
+        if status_atual:
+            metadados = row.get("metadados")
+            if not isinstance(metadados, dict):
+                metadados = {}
+                row["metadados"] = metadados
+
+            metadados["live_status"] = status_atual
+            metadados["live_status_verificado_em"] = datetime.now(UTC).isoformat()
+
+    prioridade = {
+        "is_live": 0,
+        "is_upcoming": 1,
+        "was_live": 2,
+    }
+
+    rows.sort(
+        key=lambda row: prioridade.get(
+            str((row.get("metadados") or {}).get("live_status") or ""),
+            3,
+        )
+    )
+
+    return rows
+
+
+def _status_live_card(duration_text: str, metadata_text: str) -> str:
+    duracao = duration_text.strip().lower()
+    metadata = metadata_text.strip().lower()
+
+    if "ao vivo" in duracao or duracao in {"live", "live now"}:
+        return "is_live"
+
+    if any(
+        termo in duracao
+        for termo in ("em breve", "upcoming", "premiere", "estreia")
+    ):
+        return "is_upcoming"
+
+    if any(
+        termo in metadata
+        for termo in ("programado para", "agendado para", "scheduled for", "estreia em")
+    ):
+        return "is_upcoming"
+
+    return "was_live"
 
 
 class YoutubeScrapeError(RuntimeError):
@@ -185,7 +380,12 @@ def listar_videos(
             columns = [desc.name for desc in cur.description]
             rows = [dict(zip(columns, row, strict=True)) for row in cur.fetchall()]
 
-    return [_serializar_video(row) for row in rows]
+    videos = [_serializar_video(row) for row in rows]
+
+    if tipo == "live":
+        videos = _atualizar_status_lives(videos)
+
+    return videos
 
 
 def status_videos() -> dict:
@@ -566,6 +766,10 @@ class YoutubePublicScraper:
                 "embed_url": f"https://www.youtube.com/embed/{video_id}",
                 "url_extraida": href or canonical_url,
             }
+
+            if tipo == "live":
+                metadados["live_status"] = _status_live_card(duration_text, metadata_text)
+
             metadados = {key: value for key, value in metadados.items() if value is not None}
 
             resultado.append(

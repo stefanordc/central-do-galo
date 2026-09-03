@@ -1,0 +1,213 @@
+diff --git a/backend/app/services/video_service.py b/backend/app/services/video_service.py
+--- a/backend/app/services/video_service.py
++++ b/backend/app/services/video_service.py
+@@
+ import time
+ from datetime import UTC, datetime, timedelta
+ from pathlib import Path
+ from typing import Any
+ from urllib.parse import parse_qs, urlparse
++from urllib.request import Request, urlopen
+ from uuid import UUID
+@@
+ TIPOS_VALIDOS = {"video", "short", "live"}
++_LIVE_STATUS_CACHE: dict[str, tuple[float, str]] = {}
++_LIVE_STATUS_CACHE_SECONDS = 60
+@@
+ def _serializar_video(data: dict[str, Any]) -> dict[str, Any]:
+@@
+     return data
++
++
++def _status_live_card(duration_text: str, card_text: str) -> str:
++    duration = duration_text.strip().lower()
++    texto = card_text.strip().lower()
++    if duration in {"ao vivo", "live"} or "assistindo agora" in texto:
++        return "is_live"
++    if duration in {"em breve", "upcoming"} or "programado para" in texto or "scheduled for" in texto:
++        return "is_upcoming"
++    return "ended"
++
++
++def _status_live_atual(video_id: str, fallback: str = "ended") -> str:
++    agora = time.monotonic()
++    cache = _LIVE_STATUS_CACHE.get(video_id)
++    if cache and agora - cache[0] < _LIVE_STATUS_CACHE_SECONDS:
++        return cache[1]
++
++    try:
++        request = Request(
++            f"https://www.youtube.com/watch?v={video_id}",
++            headers={
++                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/152 Safari/537.36",
++                "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
++            },
++        )
++        with urlopen(request, timeout=5) as response:
++            html = response.read().decode("utf-8", errors="ignore")
++
++        if re.search(r'"isLiveNow"\s*:\s*true', html):
++            status = "is_live"
++        elif re.search(r'"isUpcoming"\s*:\s*true', html):
++            status = "is_upcoming"
++        else:
++            status = "ended"
++    except Exception as exc:
++        logger.debug("[YouTube] não foi possível confirmar live %s: %s", video_id, exc)
++        status = fallback
++
++    _LIVE_STATUS_CACHE[video_id] = (agora, status)
++    return status
+@@
+-    return [_serializar_video(row) for row in rows]
++    resultado = [_serializar_video(row) for row in rows]
++    if tipo == "live":
++        for video in resultado:
++            metadados = video.get("metadados") or {}
++            fallback = str(metadados.get("live_status") or "ended")
++            metadados["live_status"] = _status_live_atual(video["video_id"], fallback=fallback)
++            video["metadados"] = metadados
++        resultado.sort(key=lambda video: video["metadados"].get("live_status") != "is_live")
++    return resultado
+@@
+             metadados: dict[str, Any] = {
+@@
+                 "url_extraida": href or canonical_url,
+             }
++            if tipo == "live":
++                metadados["live_status"] = _status_live_card(
++                    duration_text,
++                    str(card.get("card_text") or ""),
++                )
+             metadados = {key: value for key, value in metadados.items() if value is not None}
+
+diff --git a/frontend/src/app/videos/page.tsx b/frontend/src/app/videos/page.tsx
+--- a/frontend/src/app/videos/page.tsx
++++ b/frontend/src/app/videos/page.tsx
+@@
+ const API_URL = "/backend";
++type Aba = "video" | "short" | "live";
++
++const ABAS: Array<{ valor: Aba; rotulo: string }> = [
++  { valor: "video", rotulo: "Vídeos" },
++  { valor: "short", rotulo: "Reels" },
++  { valor: "live", rotulo: "Ao Vivo" },
++];
+@@
+   const [videos, setVideos] = useState<Video[]>([]);
+   const [busca, setBusca] = useState("");
++  const [abaAtiva, setAbaAtiva] = useState<Aba>("video");
+@@
+-    fetch(`${API_URL}/api/videos?limit=50&offset=0`, { cache: "no-store" })
++    fetch(`${API_URL}/api/videos?tipo=${abaAtiva}&limit=50&offset=0`, { cache: "no-store" })
+@@
+-  }, []);
++  }, [abaAtiva]);
+@@
+-    if (!termo) return videos;
+-    return videos.filter((video) =>
++    const filtrados = !termo ? videos : videos.filter((video) =>
+       [video.titulo, video.fonte_nome]
+         .filter(Boolean)
+         .some((valor) => valor.toLocaleLowerCase("pt-BR").includes(termo))
+     );
++    if (abaAtiva !== "live") return filtrados;
++    return [...filtrados].sort((a, b) => {
++      const aLive = a.metadados.live_status === "is_live" ? 1 : 0;
++      const bLive = b.metadados.live_status === "is_live" ? 1 : 0;
++      return bLive - aLive;
++    });
+-  }, [busca, videos]);
++  }, [abaAtiva, busca, videos]);
+@@
+       <label style={{ display: "grid", gap: 8, marginBottom: 24 }}>
+@@
+       </label>
++
++      <div className="video-pill-tabs" role="tablist" aria-label="Tipo de vídeo">
++        {ABAS.map((aba) => (
++          <button
++            key={aba.valor}
++            type="button"
++            role="tab"
++            aria-selected={abaAtiva === aba.valor}
++            className={abaAtiva === aba.valor ? "active" : ""}
++            onClick={() => setAbaAtiva(aba.valor)}
++          >
++            {aba.rotulo}
++          </button>
++        ))}
++      </div>
+@@
+           {videosFiltrados.map((video) => (
+             <a key={video.id} href={video.url} target="_blank" rel="noopener noreferrer" style={{ color: "inherit", textDecoration: "none" }}>
+-              <img
+-                src={video.thumbnail_url || `https://i.ytimg.com/vi/${video.video_id}/hqdefault.jpg`}
+-                alt=""
+-                style={{ width: "100%", aspectRatio: "16 / 9", objectFit: "cover", borderRadius: 14 }}
+-              />
++              <span className="video-thumb">
++                <img
++                  src={video.thumbnail_url || `https://i.ytimg.com/vi/${video.video_id}/hqdefault.jpg`}
++                  alt=""
++                />
++                {video.metadados.live_status === "is_live" && <span className="live-now-badge">AO VIVO</span>}
++              </span>
+               <strong style={{ display: "block", marginTop: 10 }}>{video.titulo}</strong>
+@@
+         </section>
+       )}
++      <style jsx>{`
++        .video-pill-tabs {
++          display: flex;
++          gap: 8px;
++          flex-wrap: wrap;
++          margin: 0 0 24px;
++        }
++        .video-pill-tabs button {
++          min-height: 38px;
++          padding: 0 16px;
++          border: 1px solid #d7d7d2;
++          border-radius: 999px;
++          background: #fff;
++          color: #161616;
++          cursor: pointer;
++          font-weight: 700;
++        }
++        .video-pill-tabs button.active {
++          border-color: #161616;
++          background: #161616;
++          color: #fff;
++        }
++        .video-thumb {
++          position: relative;
++          display: block;
++        }
++        .video-thumb img {
++          display: block;
++          width: 100%;
++          aspect-ratio: 16 / 9;
++          object-fit: cover;
++          border-radius: 14px;
++        }
++        .live-now-badge {
++          position: absolute;
++          left: 10px;
++          bottom: 10px;
++          padding: 5px 9px;
++          border-radius: 999px;
++          background: #16803c;
++          color: #fff;
++          font-size: 11px;
++          font-weight: 900;
++          letter-spacing: 0.04em;
++          animation: live-pulse 1.6s ease-in-out infinite;
++        }
++        @keyframes live-pulse {
++          0%, 100% { box-shadow: 0 0 0 0 rgba(22, 128, 60, 0.35); }
++          50% { box-shadow: 0 0 0 7px rgba(22, 128, 60, 0); }
++        }
++      `}</style>
+     </main>
+   );
+ }

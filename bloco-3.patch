@@ -1,0 +1,202 @@
+diff --git a/frontend/src/app/page.tsx b/frontend/src/app/page.tsx
+--- a/frontend/src/app/page.tsx
++++ b/frontend/src/app/page.tsx
+@@
+   const [perfisX, setPerfisX] = useState<ContaXFiltro[]>([]);
+   const [perfilSelecionadoX, setPerfilSelecionadoX] = useState("");
++  const [buscaX, setBuscaX] = useState("");
+@@
+   const filtroAtivo = Boolean(categoriaSelecionada || fonteSelecionada || buscaAplicada);
++  const termoBuscaX = buscaX.trim().toLocaleLowerCase("pt-BR");
++  const feedXFiltrado = termoBuscaX
++    ? feedX.filter((post) =>
++        [post.texto, post.conta_nome, post.conta_usuario]
++          .filter((valor): valor is string => typeof valor === "string")
++          .some((valor) => valor.toLocaleLowerCase("pt-BR").includes(termoBuscaX))
++      )
++    : feedX;
+@@
+           <section className="section-header x-section-header">
+@@
+             <label className="x-profile-filter">
++              <span className="filter-label">Buscar</span>
++              <input
++                type="search"
++                value={buscaX}
++                onChange={(event) => setBuscaX(event.target.value)}
++                placeholder="Buscar por termo, jogador, treino..."
++                aria-label="Buscar publicações do X"
++              />
++            </label>
++            <label className="x-profile-filter">
+               <span className="filter-label">Perfil</span>
+@@
+-          {!erroX && !carregandoX && feedX.length === 0 && statusX && statusX.posts_total > 0 && (
++          {!erroX && !carregandoX && feedXFiltrado.length === 0 && statusX && statusX.posts_total > 0 && (
+             <div className="state-card">
+-              <strong>Nenhuma publicação encontrada para este perfil.</strong>
+-              <span>Escolha outro perfil ou volte para “Todos os perfis”.</span>
++              <strong>Nenhuma publicação encontrada para os filtros atuais.</strong>
++              <span>Altere a busca ou selecione outro perfil.</span>
+             </div>
+           )}
+-          {!erroX && !carregandoX && feedX.length > 0 && (
++          {!erroX && !carregandoX && feedXFiltrado.length > 0 && (
+             <>
+               <section className="x-timeline-list" aria-label="Timeline de publicações do X">
+-                {feedX.map((post) => (
++                {feedXFiltrado.map((post) => (
+                   <XTimelineItem post={post} key={post.id} />
+                 ))}
+               </section>
+
+diff --git a/frontend/src/app/videos/page.tsx b/frontend/src/app/videos/page.tsx
+--- a/frontend/src/app/videos/page.tsx
++++ b/frontend/src/app/videos/page.tsx
+@@
+-'use client';
+-
+-import { useState, useEffect } from 'react';
+-
+-import Link from 'next/link';
+-
+-export default function VideosPage() {
+-
+-const [activeTab, setActiveTab] = useState('video');
+-
+-const [videos, setVideos] = useState([]);
+-const [loading, setLoading] = useState(true);
+-
+-useEffect(() => {
+-
+-fetch('http://localhost:8000/api/videos')
+-
+-.then(res => res.json())
+-
+-.then(data => { setVideos(data); setLoading(false); })
+-
+-.catch(err => { console.error(err); setLoading(false); });
+-
+-}, []);
+-
+-return (
+-
+-<main className="page-main">
+-
+-<nav style={{display: 'flex', gap: '20px', padding: '20px', background: '#000'}}>
+-
+-<Link href="/" style={{color: '#fff', fontSize: '18px', textDecoration: 'none'}}>Notícias</Link>
+-<Link href="/videos" style={{color: '#fff', fontSize: '18px', textDecoration: 'none', fontWeight: 'bold'}}>Vídeos</Link>
+-</nav>
+-
+-</main>
+-);
+-}
++"use client";
++
++import Link from "next/link";
++import { useEffect, useMemo, useState } from "react";
++
++type Video = {
++  id: string;
++  video_id: string;
++  titulo: string;
++  url: string;
++  thumbnail_url: string | null;
++  tipo: "video" | "short" | "live";
++  publicado_em: string | null;
++  coletado_em: string;
++  fonte_nome: string;
++  metadados: Record<string, unknown>;
++};
++
++const API_URL = "/backend";
++
++export default function VideosPage() {
++  const [videos, setVideos] = useState<Video[]>([]);
++  const [busca, setBusca] = useState("");
++  const [loading, setLoading] = useState(true);
++  const [erro, setErro] = useState<string | null>(null);
++
++  useEffect(() => {
++    let ativo = true;
++    setLoading(true);
++    fetch(`${API_URL}/api/videos?limit=50&offset=0`, { cache: "no-store" })
++      .then((response) => {
++        if (!response.ok) throw new Error(`API de vídeos respondeu ${response.status}`);
++        return response.json() as Promise<Video[]>;
++      })
++      .then((data) => {
++        if (!ativo) return;
++        setVideos(data);
++        setErro(null);
++      })
++      .catch((error) => {
++        if (!ativo) return;
++        setErro(error instanceof Error ? error.message : "Falha ao carregar vídeos.");
++      })
++      .finally(() => {
++        if (ativo) setLoading(false);
++      });
++    return () => {
++      ativo = false;
++    };
++  }, []);
++
++  const videosFiltrados = useMemo(() => {
++    const termo = busca.trim().toLocaleLowerCase("pt-BR");
++    if (!termo) return videos;
++    return videos.filter((video) =>
++      [video.titulo, video.fonte_nome]
++        .filter(Boolean)
++        .some((valor) => valor.toLocaleLowerCase("pt-BR").includes(termo))
++    );
++  }, [busca, videos]);
++
++  return (
++    <main style={{ maxWidth: 1180, margin: "0 auto", padding: "32px 20px 60px" }}>
++      <nav style={{ display: "flex", gap: 20, marginBottom: 28 }}>
++        <Link href="/">Início</Link>
++        <strong>Vídeos</strong>
++      </nav>
++
++      <header style={{ marginBottom: 24 }}>
++        <p className="eyebrow">CENTRAL DO GALO</p>
++        <h1>Vídeos do Atlético</h1>
++      </header>
++
++      <label style={{ display: "grid", gap: 8, marginBottom: 24 }}>
++        <span className="filter-label">Buscar vídeos</span>
++        <input
++          type="search"
++          value={busca}
++          onChange={(event) => setBusca(event.target.value)}
++          placeholder="Buscar por termo, jogador, treino..."
++          style={{ minHeight: 44, padding: "0 14px", borderRadius: 12, border: "1px solid #d7d7d2" }}
++        />
++      </label>
++
++      {loading && <div className="state-card">Carregando vídeos...</div>}
++      {erro && <div className="state-card error-card">{erro}</div>}
++      {!loading && !erro && videosFiltrados.length === 0 && (
++        <div className="state-card">Nenhum vídeo encontrado.</div>
++      )}
++
++      {!loading && !erro && videosFiltrados.length > 0 && (
++        <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 18 }}>
++          {videosFiltrados.map((video) => (
++            <a key={video.id} href={video.url} target="_blank" rel="noopener noreferrer" style={{ color: "inherit", textDecoration: "none" }}>
++              <img
++                src={video.thumbnail_url || `https://i.ytimg.com/vi/${video.video_id}/hqdefault.jpg`}
++                alt=""
++                style={{ width: "100%", aspectRatio: "16 / 9", objectFit: "cover", borderRadius: 14 }}
++              />
++              <strong style={{ display: "block", marginTop: 10 }}>{video.titulo}</strong>
++              <span style={{ display: "block", marginTop: 4, fontSize: 13, opacity: 0.68 }}>{video.fonte_nome}</span>
++            </a>
++          ))}
++        </section>
++      )}
++    </main>
++  );
++}

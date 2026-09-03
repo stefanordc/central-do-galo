@@ -1,0 +1,49 @@
+diff --git a/frontend/src/app/admin/page.tsx b/frontend/src/app/admin/page.tsx
+--- a/frontend/src/app/admin/page.tsx
++++ b/frontend/src/app/admin/page.tsx
+@@
+   const [oficialCanal, setOficialCanal] = useState(false);
+   const [confiabilidadeCanal, setConfiabilidadeCanal] = useState(80);
++  const [buscaCanal, setBuscaCanal] = useState("");
++  const [canalSelecionado, setCanalSelecionado] = useState("");
+@@
+   const authHeaders = useMemo(
+@@
+   );
++  const canaisYoutubeFiltrados = useMemo(() => {
++    const termo = buscaCanal.trim().toLocaleLowerCase("pt-BR");
++    return canaisYoutube.filter((canal) => {
++      const correspondeBusca = !termo || canal.nome.toLocaleLowerCase("pt-BR").includes(termo);
++      const correspondeSelecao = !canalSelecionado || canal.id === canalSelecionado;
++      return correspondeBusca && correspondeSelecao;
++    });
++  }, [buscaCanal, canalSelecionado, canaisYoutube]);
+@@
+           </form>
++          <div className="admin-form">
++            <label>
++              Buscar canal
++              <input
++                type="search"
++                value={buscaCanal}
++                onChange={(event) => setBuscaCanal(event.target.value)}
++                placeholder="Buscar canal..."
++              />
++            </label>
++            <label>
++              Canal
++              <select
++                value={canalSelecionado}
++                onChange={(event) => setCanalSelecionado(event.target.value)}
++              >
++                <option value="">Todos os canais</option>
++                {canaisYoutube.map((canal) => (
++                  <option value={canal.id} key={canal.id}>{canal.nome}</option>
++                ))}
++              </select>
++            </label>
++          </div>
+           <div className="admin-list">
+-            {canaisYoutube.map((canal) => (
++            {canaisYoutubeFiltrados.map((canal) => (
+               <div className="admin-list-item" key={canal.id}>
