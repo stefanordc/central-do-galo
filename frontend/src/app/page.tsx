@@ -731,6 +731,7 @@ export default function Home() {
   const [perfilSelecionadoX, setPerfilSelecionadoX] = useState("");
   const [buscaX, setBuscaX] = useState("");
   const [buscaVideos, setBuscaVideos] = useState("");
+  const [canalSelecionadoYoutube, setCanalSelecionadoYoutube] = useState("");
   const [filtroVideos, setFiltroVideos] = useState<"video" | "short" | "live">("video");
   const [videosYoutube, setVideosYoutube] = useState<VideoYoutube[]>([]);
   const [shortsYoutube, setShortsYoutube] = useState<VideoYoutube[]>([]);
@@ -836,52 +837,37 @@ export default function Home() {
     }
   }
 
-  async function carregarVideosYoutube() {
-    if (canaisYoutubeDisponiveis.length === 0) {
-      return;
+  async function carregarVideosYoutube({
+    silencioso = false,
+  }: {
+    silencioso?: boolean;
+  } = {}) {
+    if (!silencioso) {
+      setCarregandoVideos(true);
     }
 
-    setCarregandoVideos(true);
-
     try {
-      const carregarTipoPorCanal = async (tipo: VideoYoutube["tipo"]) => {
-        const responses = await Promise.all(
-          canaisYoutubeDisponiveis.map((fonte) =>
-            fetch(
-              `${API_URL}/api/videos?tipo=${tipo}&limit=${YOUTUBE_PAGE_SIZE}&offset=0&fonte=${encodeURIComponent(fonte.slug)}`,
-              { cache: "no-store" }
-            )
-          )
-        );
-
-        const falha = responses.find((response) => !response.ok);
-        if (falha) {
-          throw new Error(`API de vídeos respondeu ${falha.status}`);
-        }
-
-        const blocos = await Promise.all(
-          responses.map((response) => response.json() as Promise<VideoYoutube[]>)
-        );
-
-        return blocos
-          .flat()
-          .sort((a, b) => {
-            const dataA = new Date(a.publicado_em ?? a.coletado_em).getTime();
-            const dataB = new Date(b.publicado_em ?? b.coletado_em).getTime();
-            return dataB - dataA;
-          });
-      };
-
-      const [videosData, shortsData, livesData, statusResponse] = await Promise.all([
-        carregarTipoPorCanal("video"),
-        carregarTipoPorCanal("short"),
-        carregarTipoPorCanal("live"),
+      const [feedResponse, statusResponse] = await Promise.all([
+        fetch(
+          `${API_URL}/api/videos/feed?limit_por_canal=${YOUTUBE_PAGE_SIZE}`,
+          { cache: "no-store" }
+        ),
         fetch(`${API_URL}/api/videos/status`, { cache: "no-store" }),
       ]);
 
-      setVideosYoutube(videosData);
-      setShortsYoutube(shortsData);
-      setLivesYoutube(livesData);
+      if (!feedResponse.ok) {
+        throw new Error(`API de vídeos respondeu ${feedResponse.status}`);
+      }
+
+      const data: {
+        videos: VideoYoutube[];
+        shorts: VideoYoutube[];
+        lives: VideoYoutube[];
+      } = await feedResponse.json();
+
+      setVideosYoutube(data.videos);
+      setShortsYoutube(data.shorts);
+      setLivesYoutube(data.lives);
 
       if (statusResponse.ok) {
         setStatusVideos(await statusResponse.json());
@@ -892,7 +878,9 @@ export default function Home() {
       const mensagem = error instanceof Error ? error.message : "Falha ao carregar vídeos";
       setErroVideos(mensagem);
     } finally {
-      setCarregandoVideos(false);
+      if (!silencioso) {
+        setCarregandoVideos(false);
+      }
     }
   }
 
@@ -959,12 +947,21 @@ export default function Home() {
   }, [categoriaSelecionada, fonteSelecionada, buscaAplicada, secaoAtiva]);
 
   useEffect(() => {
-    if (secaoAtiva !== "videos" || canaisYoutubeDisponiveis.length === 0) return;
+    if (canaisYoutubeDisponiveis.length === 0) return;
 
-    carregarVideosYoutube();
-    const interval = window.setInterval(() => carregarVideosYoutube(), 60_000);
+    carregarVideosYoutube({ silencioso: true });
+  }, [canaisYoutubeDisponiveis]);
+
+  useEffect(() => {
+    if (secaoAtiva !== "videos") return;
+
+    const interval = window.setInterval(
+      () => carregarVideosYoutube({ silencioso: true }),
+      60_000
+    );
+
     return () => window.clearInterval(interval);
-  }, [secaoAtiva, canaisYoutubeDisponiveis]);
+  }, [secaoAtiva]);
 
   useEffect(() => {
     if (secaoAtiva !== "x") return;
@@ -1000,16 +997,23 @@ export default function Home() {
     : feedX;
 
   const termoBuscaVideos = normalizarBusca(buscaVideos);
+
   const filtrarVideos = (items: VideoYoutube[]) =>
-    termoBuscaVideos
-      ? items.filter((video) =>
-          [
-            video.titulo,
-            video.descricao ?? "",
-            video.fonte_nome,
-          ].some((valor) => normalizarBusca(valor).includes(termoBuscaVideos))
-        )
-      : items;
+    items.filter((video) => {
+      const correspondeCanal =
+        !canalSelecionadoYoutube ||
+        video.fonte_slug === canalSelecionadoYoutube;
+
+      const correspondeBusca =
+        !termoBuscaVideos ||
+        [
+          video.titulo,
+          video.descricao ?? "",
+          video.fonte_nome,
+        ].some((valor) => normalizarBusca(valor).includes(termoBuscaVideos));
+
+      return correspondeCanal && correspondeBusca;
+    });
 
   const videosYoutubeFiltrados = filtrarVideos(videosYoutube);
   const shortsYoutubeFiltrados = filtrarVideos(shortsYoutube);
@@ -1115,7 +1119,7 @@ export default function Home() {
               type="search"
               value={buscaDigitada}
               onChange={(event) => setBuscaDigitada(event.target.value)}
-              placeholder="Ex.: Savinho, Fred, Cruzeiro, Scarpa..."
+              placeholder="Ex.: Savinho, Fred, Arena MRV, Scarpa..."
             />
             <button type="submit">Pesquisar</button>
           </div>
@@ -1336,6 +1340,24 @@ export default function Home() {
                 </button>
               </div>
             </div>
+
+            <div className="filter-source-row">
+              <label>
+                <span className="filter-label">Canal</span>
+                <select
+                  value={canalSelecionadoYoutube}
+                  onChange={(event) => setCanalSelecionadoYoutube(event.target.value)}
+                  aria-label="Filtrar vídeos por canal"
+                >
+                  <option value="">Todos os canais</option>
+                  {canaisYoutubeDisponiveis.map((canal) => (
+                    <option value={canal.slug} key={canal.id}>
+                      {canal.nome}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
           </section>
 
           <div className="youtube-channel-strip">
@@ -1412,33 +1434,47 @@ export default function Home() {
                 mais antiga. Exibimos 20 por vez.
               </p>
             </div>
+          </section>
 
-            <div className="x-profile-filter">
-              <span className="filter-label">Buscar</span>
-              <input
-                type="search"
-                value={buscaX}
-                onChange={(event) => setBuscaX(event.target.value)}
-                placeholder="Buscar por termo, jogador, treino..."
-                aria-label="Buscar publicações no X"
-              />
+          <section className="filters-panel">
+            <form
+              className="search-form"
+              onSubmit={(event) => event.preventDefault()}
+            >
+              <label htmlFor="x-search" className="filter-label">
+                Pesquisar no histórico
+              </label>
+
+              <div className="search-row">
+                <input
+                  id="x-search"
+                  type="search"
+                  value={buscaX}
+                  onChange={(event) => setBuscaX(event.target.value)}
+                  placeholder="Ex.: Hulk, Scarpa, Arena MRV, treino..."
+                  aria-label="Buscar publicações no X"
+                />
+                <button type="submit">Pesquisar</button>
+              </div>
+            </form>
+
+            <div className="filter-source-row">
+              <label>
+                <span className="filter-label">Perfil</span>
+                <select
+                  value={perfilSelecionadoX}
+                  onChange={(event) => setPerfilSelecionadoX(event.target.value)}
+                  aria-label="Filtrar timeline por perfil do X"
+                >
+                  <option value="">Todos os perfis</option>
+                  {perfisX.map((conta) => (
+                    <option value={conta.usuario} key={conta.id}>
+                      {conta.nome} (@{conta.usuario})
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
-
-            <label className="x-profile-filter">
-              <span className="filter-label">Perfil</span>
-              <select
-                value={perfilSelecionadoX}
-                onChange={(event) => setPerfilSelecionadoX(event.target.value)}
-                aria-label="Filtrar timeline por perfil do X"
-              >
-                <option value="">Todos os perfis</option>
-                {perfisX.map((conta) => (
-                  <option value={conta.usuario} key={conta.id}>
-                    {conta.nome} (@{conta.usuario})
-                  </option>
-                ))}
-              </select>
-            </label>
           </section>
 
           {erroX && (

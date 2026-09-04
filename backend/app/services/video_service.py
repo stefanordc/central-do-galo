@@ -24,6 +24,29 @@ settings = get_settings()
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 TIPOS_VALIDOS = {"video", "short", "live"}
+DIAS_INATIVIDADE_TIPO_YOUTUBE = 60
+
+FILTROS_ESPECIAIS_YOUTUBE: dict[str, dict[str, list[str]]] = {
+    "youtube-getv": {
+        "incluir": ["Atlético-MG", "Galo"],
+        "excluir": ["Atlético Madrid", "Atlético de Madrid", "LaLiga"],
+    },
+    "youtube-espnbrasil": {
+        "incluir": ["Atlético-MG", "Galo"],
+        "excluir": ["Atlético Madrid", "Atlético de Madrid", "LaLiga"],
+    },
+    "youtube-cazetv": {
+        "incluir": ["Atlético-MG", "Galo"],
+        "excluir": ["Atlético Madrid", "Atlético de Madrid", "LaLiga"],
+    },
+}
+
+VIDEO_FEED_CACHE_TTL_SECONDS = 30.0
+_VIDEO_FEED_CACHE: dict[int, tuple[float, dict[str, Any]]] = {}
+
+
+def _invalidar_video_feed_cache() -> None:
+    _VIDEO_FEED_CACHE.clear()
 
 
 LIVE_STATUS_CACHE_TTL_SECONDS = 60.0
@@ -124,6 +147,130 @@ def _status_live_player_response(player: dict[str, Any]) -> str | None:
         return "was_live"
 
     return None
+
+
+def _consultar_data_publicacao_youtube(video_id: str) -> datetime | None:
+    url = f"https://www.youtube.com/watch?v={video_id}"
+    request = Request(
+        url,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/152.0.0.0 Safari/537.36"
+            ),
+            "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+        },
+    )
+
+    try:
+        with urlopen(request, timeout=6) as response:
+            html = response.read().decode("utf-8", errors="ignore")
+
+        player = _extrair_objeto_json_html(html, "ytInitialPlayerResponse")
+        if not isinstance(player, dict):
+            return None
+
+        microformat = player.get("microformat")
+        if not isinstance(microformat, dict):
+            return None
+
+        renderer = microformat.get("playerMicroformatRenderer")
+        if not isinstance(renderer, dict):
+            return None
+
+        data_texto = renderer.get("publishDate") or renderer.get("uploadDate")
+        if not isinstance(data_texto, str) or not data_texto.strip():
+            return None
+
+        data_texto = data_texto.strip()
+
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", data_texto):
+            return datetime.fromisoformat(data_texto).replace(tzinfo=UTC)
+
+        return datetime.fromisoformat(data_texto.replace("Z", "+00:00"))
+
+    except Exception as exc:
+        logger.debug(
+            "[YouTube] não foi possível obter data de publicação de %s: %s",
+            video_id,
+            exc,
+        )
+        return None
+
+
+def _atualizar_ultima_publicacao_tipo(
+    fonte_id: UUID,
+    tipo: str,
+    data_publicacao: datetime,
+) -> None:
+    chave = f"ultima_publicacao_{tipo}"
+
+    sql = """
+        update public.fontes
+        set configuracao = jsonb_set(
+            coalesce(configuracao, '{}'::jsonb),
+            %s,
+            to_jsonb(%s::text),
+            true
+        )
+        where id = %s
+    """
+
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                sql,
+                (
+                    [chave],
+                    data_publicacao.astimezone(UTC).isoformat(),
+                    fonte_id,
+                ),
+            )
+        conn.commit()
+
+
+def _registrar_ultima_publicacao_tipo(
+    fonte_id: UUID,
+    tipo: str,
+    items: list[dict[str, Any]],
+) -> None:
+    if not items:
+        return
+
+    # A coleta mantém a ordem da aba do YouTube:
+    # ordem_na_aba=1 representa o conteúdo mais recente.
+    item_mais_recente = min(
+        items,
+        key=lambda item: int(
+            (item.get("metadados") or {}).get("ordem_na_aba") or 999999
+        ),
+    )
+
+    data_publicacao = item_mais_recente.get("publicado_em")
+
+    if isinstance(data_publicacao, str):
+        try:
+            data_publicacao = datetime.fromisoformat(
+                data_publicacao.replace("Z", "+00:00")
+            )
+        except ValueError:
+            data_publicacao = None
+
+    if not isinstance(data_publicacao, datetime):
+        video_id = str(item_mais_recente.get("video_id") or "").strip()
+        if video_id:
+            data_publicacao = _consultar_data_publicacao_youtube(video_id)
+
+    if isinstance(data_publicacao, datetime):
+        if data_publicacao.tzinfo is None:
+            data_publicacao = data_publicacao.replace(tzinfo=UTC)
+
+        _atualizar_ultima_publicacao_tipo(
+            fonte_id,
+            tipo,
+            data_publicacao,
+        )
 
 
 def _consultar_status_live_atual(video_id: str) -> str | None:
@@ -385,16 +532,11 @@ def salvar_video(
         )
         values (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, true)
         on conflict (video_id) do update
-        set fonte_id = excluded.fonte_id,
-            titulo = excluded.titulo,
+        set titulo = excluded.titulo,
             url = excluded.url,
             thumbnail_url = coalesce(excluded.thumbnail_url, public.videos.thumbnail_url),
             descricao = coalesce(excluded.descricao, public.videos.descricao),
-            tipo = case
-                when public.videos.tipo = 'live' or excluded.tipo = 'live' then 'live'
-                when public.videos.tipo = 'short' or excluded.tipo = 'short' then 'short'
-                else 'video'
-            end,
+            tipo = excluded.tipo,
             publicado_em = coalesce(excluded.publicado_em, public.videos.publicado_em),
             coletado_em = now(),
             metadados = excluded.metadados,
@@ -497,12 +639,167 @@ def listar_videos(
             columns = [desc.name for desc in cur.description]
             rows = [dict(zip(columns, row, strict=True)) for row in cur.fetchall()]
 
-    videos = [_serializar_video(row) for row in rows]
+    return [_serializar_video(row) for row in rows]
 
-    if tipo == "live":
-        videos = _atualizar_status_lives(videos)
 
-    return videos
+def listar_feed_videos_cacheado(*, limit_por_canal: int = 13) -> dict[str, Any]:
+    limit_por_canal = max(1, min(limit_por_canal, 50))
+
+    agora = time.monotonic()
+    cache = _VIDEO_FEED_CACHE.get(limit_por_canal)
+    if cache and agora - cache[0] < VIDEO_FEED_CACHE_TTL_SECONDS:
+        return cache[1]
+
+    sql = """
+        with atividade as (
+            select
+                f.id as fonte_id,
+                t.tipo,
+                max(v.publicado_em) filter (
+                    where v.ativo = true and v.tipo = t.tipo
+                ) as ultima_publicacao_banco,
+                case
+                    when t.tipo = 'video'
+                        then nullif(f.configuracao->>'ultima_publicacao_video', '')::timestamptz
+                    when t.tipo = 'short'
+                        then nullif(f.configuracao->>'ultima_publicacao_short', '')::timestamptz
+                    when t.tipo = 'live'
+                        then nullif(f.configuracao->>'ultima_publicacao_live', '')::timestamptz
+                    else null
+                end as ultima_publicacao_config
+            from public.fontes f
+            cross join (
+                values ('video'), ('short'), ('live')
+            ) as t(tipo)
+            left join public.videos v
+                on v.fonte_id = f.id
+               and v.tipo = t.tipo
+            where f.ativo = true
+              and f.tipo = 'youtube'
+            group by
+                f.id,
+                f.configuracao,
+                t.tipo
+        ),
+        tipos_recentes as (
+            select
+                fonte_id,
+                tipo
+            from atividade
+            where coalesce(
+                ultima_publicacao_config,
+                ultima_publicacao_banco,
+                case
+                    when tipo = 'short' then now()
+                    else null
+                end
+            ) >= now() - (%s || ' days')::interval
+        ),
+        ranqueados as (
+            select
+                v.id,
+                v.video_id,
+                v.titulo,
+                v.url,
+                v.thumbnail_url,
+                v.descricao,
+                v.tipo,
+                v.publicado_em,
+                v.coletado_em,
+                v.metadados,
+                f.id as fonte_id,
+                f.nome as fonte_nome,
+                f.slug as fonte_slug,
+                f.oficial as fonte_oficial,
+                row_number() over (
+                    partition by v.fonte_id, v.tipo
+                    order by
+                        coalesce(v.publicado_em, v.coletado_em) desc,
+                        v.coletado_em desc
+                ) as posicao
+            from public.videos v
+            join public.fontes f on f.id = v.fonte_id
+            join tipos_recentes tr
+              on tr.fonte_id = v.fonte_id
+             and tr.tipo = v.tipo
+            where v.ativo = true
+              and f.ativo = true
+              and f.tipo = 'youtube'
+        )
+        select
+            id,
+            video_id,
+            titulo,
+            url,
+            thumbnail_url,
+            descricao,
+            tipo,
+            publicado_em,
+            coletado_em,
+            metadados,
+            fonte_id,
+            fonte_nome,
+            fonte_slug,
+            fonte_oficial
+        from ranqueados
+        where posicao <= %s
+        order by coalesce(publicado_em, coletado_em) desc, coletado_em desc
+    """
+
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                sql,
+                (
+                    DIAS_INATIVIDADE_TIPO_YOUTUBE,
+                    limit_por_canal,
+                ),
+            )
+            columns = [desc.name for desc in cur.description]
+            rows = [dict(zip(columns, row, strict=True)) for row in cur.fetchall()]
+
+    itens = [_serializar_video(row) for row in rows]
+
+    videos = [item for item in itens if item.get("tipo") == "video"]
+    shorts = [item for item in itens if item.get("tipo") == "short"]
+    lives = [item for item in itens if item.get("tipo") == "live"]
+
+    prioridade_live = {
+        "is_live": 0,
+        "is_upcoming": 1,
+        "was_live": 2,
+    }
+
+    def chave_live(item: dict[str, Any]) -> tuple[int, float]:
+        status = str((item.get("metadados") or {}).get("live_status") or "")
+        data_texto = str(item.get("publicado_em") or item.get("coletado_em") or "")
+        try:
+            timestamp = datetime.fromisoformat(data_texto.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            timestamp = 0.0
+        return (prioridade_live.get(status, 3), -timestamp)
+
+    lives.sort(key=chave_live)
+
+    ultima_coleta = None
+    datas = [
+        str(item.get("coletado_em"))
+        for item in itens
+        if item.get("coletado_em")
+    ]
+    if datas:
+        ultima_coleta = max(datas)
+
+    resultado: dict[str, Any] = {
+        "videos": videos,
+        "shorts": shorts,
+        "lives": lives,
+        "ultima_coleta": ultima_coleta,
+        "limit_por_canal": limit_por_canal,
+    }
+
+    _VIDEO_FEED_CACHE[limit_por_canal] = (agora, resultado)
+    return resultado
 
 
 def status_videos() -> dict:
@@ -609,31 +906,20 @@ class YoutubePublicScraper:
         if self.driver is not None:
             return self.driver
 
-        profile_dir = Path(settings.youtube_scrape_profile_dir)
-        if not profile_dir.is_absolute():
-            profile_dir = BACKEND_DIR / profile_dir
-        profile_dir.mkdir(parents=True, exist_ok=True)
-
+        # Usa sempre um perfil temporário e limpo.
+        # Isso evita reaproveitar cache, DOM ou estado do canal anterior.
         kwargs: dict[str, Any] = {
             "uc": True,
             "locale_code": "pt-BR",
             "page_load_strategy": "eager",
-            "user_data_dir": str(profile_dir),
         }
+
         if settings.youtube_scrape_headless:
             kwargs["headless2"] = True
         else:
             kwargs["headed"] = True
 
-        try:
-            self.driver = Driver(**kwargs)
-        except Exception as exc:
-            logger.warning(
-                "[YouTube] perfil UC persistente indisponível (%s); tentando perfil temporário",
-                exc,
-            )
-            kwargs.pop("user_data_dir", None)
-            self.driver = Driver(**kwargs)
+        self.driver = Driver(**kwargs)
 
         self.driver.set_page_load_timeout(settings.youtube_scrape_page_timeout_seconds)
         self.driver.set_window_size(1440, 1800)
@@ -646,6 +932,78 @@ class YoutubePublicScraper:
             except Exception:
                 logger.exception("[YouTube] erro ao encerrar Chrome")
             self.driver = None
+
+    def _aguardar_canal_correto(self, url: str) -> None:
+        driver = self._driver()
+
+        match = re.search(r"youtube\.com/(@[^/]+)", url, flags=re.IGNORECASE)
+        handle = match.group(1).strip().lower() if match else ""
+
+        if not handle:
+            return
+
+        def canal_pronto(d) -> bool:
+            try:
+                current_url = str(d.current_url or "").lower()
+
+                if f"/{handle}" not in current_url:
+                    return False
+
+                return bool(
+                    d.execute_script(
+                        """
+                        const handle = arguments[0].toLowerCase();
+
+                        const canonical =
+                          document.querySelector('link[rel="canonical"]')?.href?.toLowerCase() || '';
+
+                        const ogUrl =
+                          document.querySelector('meta[property="og:url"]')?.content?.toLowerCase() || '';
+
+                        const vanity =
+                          window.ytInitialData?.metadata?.channelMetadataRenderer?.vanityChannelUrl?.toLowerCase?.() || '';
+
+                        const grade =
+                          document.querySelector('ytd-rich-grid-renderer, ytd-grid-renderer');
+
+                        const canalConfirmado =
+                          canonical.includes('/' + handle) ||
+                          ogUrl.includes('/' + handle) ||
+                          vanity.includes('/' + handle);
+
+                        return canalConfirmado && Boolean(grade);
+                        """,
+                        handle,
+                    )
+                )
+            except Exception:
+                return False
+
+        WebDriverWait(
+            driver,
+            settings.youtube_scrape_wait_seconds,
+        ).until(canal_pronto)
+
+        # Espera a grade estabilizar antes da leitura.
+        ultimo_total = -1
+        estavel = 0
+
+        for _ in range(12):
+            try:
+                total = len(self._cards_dom("video"))
+            except Exception:
+                total = 0
+
+            if total > 0 and total == ultimo_total:
+                estavel += 1
+            else:
+                estavel = 0
+
+            if estavel >= 2:
+                break
+
+            ultimo_total = total
+            time.sleep(0.35)
 
     def _salvar_debug(self, slug: str, tipo: str) -> None:
         if not settings.youtube_scrape_debug_enabled or self.driver is None:
@@ -718,63 +1076,104 @@ class YoutubePublicScraper:
         return driver.execute_script(
             """
             const tipo = arguments[0];
-            const containers = Array.from(document.querySelectorAll(
+
+            const root =
+              document.querySelector('ytd-rich-grid-renderer') ||
+              document.querySelector('ytd-grid-renderer');
+
+            if (!root) return [];
+
+            const containers = Array.from(root.querySelectorAll(
               'ytd-rich-item-renderer, ytm-shorts-lockup-view-model, ytd-grid-video-renderer, yt-lockup-view-model'
             ));
+
             const saida = [];
             const vistos = new Set();
 
             function videoId(href) {
               if (!href) return null;
+
               try {
                 const url = new URL(href, location.origin);
+
                 if (tipo === 'short') {
-                  const m = url.pathname.match(/\\/shorts\\/([A-Za-z0-9_-]{6,})/);
+                  const m = url.pathname.match(/\/shorts\/([A-Za-z0-9_-]{6,})/);
                   return m ? m[1] : null;
                 }
-                if (url.pathname === '/watch') return url.searchParams.get('v');
+
+                if (url.pathname === '/watch') {
+                  return url.searchParams.get('v');
+                }
               } catch (_) {}
+
               return null;
             }
 
-            for (const card of containers) {
+            function adicionarCard(card) {
               const links = Array.from(card.querySelectorAll('a[href]'));
               const link = links.find((a) => videoId(a.getAttribute('href')));
-              if (!link) continue;
+              if (!link) return;
+
               const href = link.href || link.getAttribute('href') || '';
               const id = videoId(href);
-              if (!id || vistos.has(id)) continue;
+              if (!id || vistos.has(id)) return;
 
               const cardText = (card.innerText || '').trim();
               const lowerText = cardText.toLowerCase();
-              if (lowerText.includes('só para membros') || lowerText.includes('members only')) continue;
+
+              if (
+                lowerText.includes('só para membros') ||
+                lowerText.includes('members only')
+              ) {
+                return;
+              }
 
               const titleNode = card.querySelector(
                 'a.ytLockupMetadataViewModelTitle, #video-title-link, #video-title, h3 a[href]'
               );
+
               let title = '';
               if (titleNode) {
-                title = (titleNode.getAttribute('title') || titleNode.textContent || '').trim();
+                title = (
+                  titleNode.getAttribute('title') ||
+                  titleNode.textContent ||
+                  ''
+                ).trim();
               }
+
               if (!title) {
-                title = (link.getAttribute('title') || link.getAttribute('aria-label') || '').trim();
+                title = (
+                  link.getAttribute('title') ||
+                  link.getAttribute('aria-label') ||
+                  ''
+                ).trim();
               }
-              if (!title) continue;
+
+              if (!title) return;
 
               const img = card.querySelector('img[src*="i.ytimg.com"]');
-              const thumb = img ? (img.currentSrc || img.src || img.getAttribute('src') || '') : '';
+              const thumb = img
+                ? (img.currentSrc || img.src || img.getAttribute('src') || '')
+                : '';
 
               const badge = card.querySelector(
                 'yt-thumbnail-badge-view-model .ytBadgeShapeText, ytd-thumbnail-overlay-time-status-renderer #text, badge-shape .ytBadgeShapeText'
               );
-              const durationText = badge ? (badge.textContent || '').trim() : '';
+              const durationText = badge
+                ? (badge.textContent || '').trim()
+                : '';
 
               const metadataNodes = Array.from(card.querySelectorAll(
                 '.ytContentMetadataViewModelMetadataText, #metadata-line span, ytd-video-meta-block #metadata-line span'
               ));
-              const metadataText = metadataNodes.map((node) => (node.textContent || '').trim()).filter(Boolean).join(' • ');
+
+              const metadataText = metadataNodes
+                .map((node) => (node.textContent || '').trim())
+                .filter(Boolean)
+                .join(' • ');
 
               vistos.add(id);
+
               saida.push({
                 video_id: id,
                 href,
@@ -786,19 +1185,47 @@ class YoutubePublicScraper:
               });
             }
 
-            // Fallback para layouts em que o wrapper ainda não é conhecido.
+            for (const card of containers) {
+              adicionarCard(card);
+            }
+
+            // Fallback também restrito à grade do canal.
             if (!saida.length) {
-              const anchors = Array.from(document.querySelectorAll('a[href*="/watch?v="], a[href*="/shorts/"]'));
+              const anchors = Array.from(
+                root.querySelectorAll(
+                  'a[href*="/watch?v="], a[href*="/shorts/"]'
+                )
+              );
+
               for (const link of anchors) {
                 const href = link.href || link.getAttribute('href') || '';
                 const id = videoId(href);
+
                 if (!id || vistos.has(id)) continue;
-                const title = (link.getAttribute('title') || link.getAttribute('aria-label') || link.textContent || '').trim();
+
+                const title = (
+                  link.getAttribute('title') ||
+                  link.getAttribute('aria-label') ||
+                  link.textContent ||
+                  ''
+                ).trim();
+
                 if (!title) continue;
+
                 vistos.add(id);
-                saida.push({ video_id: id, href, titulo: title, thumbnail_url: '', duration_text: '', metadata_text: '', card_text: '' });
+
+                saida.push({
+                  video_id: id,
+                  href,
+                  titulo: title,
+                  thumbnail_url: '',
+                  duration_text: '',
+                  metadata_text: '',
+                  card_text: '',
+                });
               }
             }
+
             return saida;
             """,
             tipo,
@@ -809,11 +1236,15 @@ class YoutubePublicScraper:
         logger.info("[YouTube] GET %s", url)
         driver.get(url)
         self._fechar_consentimento()
+        self._aguardar_canal_correto(url)
 
         # Fluxo pedido para a aba de vídeos: escolher explicitamente o filtro Público.
         # Nas outras abas, usa o mesmo filtro somente se ele existir no DOM.
         if tipo == "video":
-            self._clicar_publico()
+            if slug == "youtube-canaldofrossard":
+                self._clicar_publico_se_existir()
+            else:
+                self._clicar_publico()
         else:
             self._clicar_publico_se_existir()
 
@@ -926,30 +1357,37 @@ def sincronizar_youtube() -> dict:
     total_processados = 0
     total_salvos = 0
     resultados: list[dict[str, Any]] = []
-    scraper = YoutubePublicScraper()
 
-    try:
-        for fonte in fontes:
-            config = fonte.get("configuracao") or {}
-            if not isinstance(config, dict):
-                config = {}
+    for fonte in fontes:
+        config = fonte.get("configuracao") or {}
+        if not isinstance(config, dict):
+            config = {}
 
-            _desativar_membros_antigos(fonte["id"])
+        _desativar_membros_antigos(fonte["id"])
 
-            abas = [
-                ("video", config.get("videos_url")),
-                ("short", config.get("shorts_url")),
-                ("live", config.get("streams_url")),
-            ]
-            fonte_resultado = {
-                "fonte": fonte["slug"],
-                "nome": fonte["nome"],
-                "videos": 0,
-                "shorts": 0,
-                "lives": 0,
-                "erros": [],
-            }
+        abas = [
+            ("video", config.get("videos_url")),
+            ("short", config.get("shorts_url")),
+            ("live", config.get("streams_url")),
+        ]
 
+        fonte_resultado = {
+            "fonte": fonte["slug"],
+            "nome": fonte["nome"],
+            "videos": 0,
+            "shorts": 0,
+            "lives": 0,
+            "erros": [],
+        }
+
+        ids_encontrados_na_aba_videos: set[str] = set()
+
+        # IMPORTANTE:
+        # cada canal usa uma sessão Selenium própria.
+        # Isso impede que cards/DOM do canal anterior sejam reaproveitados.
+        scraper = YoutubePublicScraper()
+
+        try:
             for tipo, url in abas:
                 if not isinstance(url, str) or not url.strip():
                     continue
@@ -961,6 +1399,11 @@ def sincronizar_youtube() -> dict:
                 filtro_excluir_termos = config.get("filtro_excluir_termos")
                 if not isinstance(filtro_excluir_termos, list):
                     filtro_excluir_termos = []
+
+                regra_especial = FILTROS_ESPECIAIS_YOUTUBE.get(fonte["slug"])
+                if regra_especial:
+                    filtro_termos = list(regra_especial["incluir"])
+                    filtro_excluir_termos = list(regra_especial["excluir"])
 
                 if filtro_termos or filtro_excluir_termos:
                     desativados = _desativar_videos_fora_do_filtro(
@@ -975,7 +1418,7 @@ def sincronizar_youtube() -> dict:
                             desativados,
                         )
 
-                limite_coleta = settings.youtube_items_per_section
+                limite_coleta = max(settings.youtube_items_per_section, 13)
                 if filtro_termos or filtro_excluir_termos:
                     # Canais generalistas precisam de uma varredura maior para
                     # encontrarmos publicações específicas do Atlético.
@@ -1013,6 +1456,33 @@ def sincronizar_youtube() -> dict:
                         len(items),
                     )
 
+                    if fonte["slug"] == "youtube-getv":
+                        for item in items:
+                            logger.info(
+                                "[YouTube][ge tv] ACEITO | %s",
+                                item.get("titulo"),
+                            )
+
+                _registrar_ultima_publicacao_tipo(
+                    fonte["id"],
+                    tipo,
+                    items,
+                )
+
+                if tipo == "video":
+                    ids_encontrados_na_aba_videos.update(
+                        str(item.get("video_id") or "")
+                        for item in items
+                        if item.get("video_id")
+                    )
+
+                if tipo == "live" and ids_encontrados_na_aba_videos:
+                    items = [
+                        item
+                        for item in items
+                        if str(item.get("video_id") or "") not in ids_encontrados_na_aba_videos
+                    ]
+
                 for item in items:
                     salvar_video(fonte_id=fonte["id"], **item)
                     total_salvos += 1
@@ -1024,9 +1494,13 @@ def sincronizar_youtube() -> dict:
                 elif tipo == "live":
                     fonte_resultado["lives"] = len(items)
 
-            resultados.append(fonte_resultado)
-    finally:
-        scraper.close()
+        finally:
+            # Fecha completamente o navegador antes de passar ao próximo canal.
+            scraper.close()
+
+        resultados.append(fonte_resultado)
+
+    _invalidar_video_feed_cache()
 
     return {
         "fontes": len(fontes),

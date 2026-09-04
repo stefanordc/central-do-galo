@@ -1,6 +1,10 @@
 from fastapi import APIRouter, Query
 
-from app.services.video_service import listar_videos, status_videos
+from app.services.video_service import (
+    listar_feed_videos_cacheado,
+    listar_videos,
+    status_videos,
+)
 
 router = APIRouter(prefix="/videos", tags=["videos"])
 
@@ -17,6 +21,15 @@ def get_videos(
         limit=limit,
         offset=offset,
         fonte=fonte.strip() if fonte else None,
+    )
+
+
+@router.get("/feed")
+def get_video_feed(
+    limit_por_canal: int = Query(default=13, ge=1, le=50),
+) -> dict:
+    return listar_feed_videos_cacheado(
+        limit_por_canal=limit_por_canal,
     )
 
 
