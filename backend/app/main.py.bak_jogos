@@ -232,8 +232,3 @@ def root() -> dict:
         },
         "docs": "/docs",
     }
-
-# CENTRAL_DO_GALO_JOGOS_ROUTER
-from app.api.routes import jogos as jogos_routes
-app.include_router(jogos_routes.router, prefix="/api")
-
