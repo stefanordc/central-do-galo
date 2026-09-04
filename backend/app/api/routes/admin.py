@@ -1,4 +1,5 @@
 import secrets
+from typing import Literal
 
 from fastapi import APIRouter, Header, HTTPException, status
 from pydantic import BaseModel, Field
@@ -13,6 +14,10 @@ from app.services.admin_service import (
 from app.services.source_service import (
     criar_canal_youtube,
     listar_canais_youtube_admin,
+)
+from app.services.site_config_service import (
+    atualizar_capa_site,
+    obter_capa_site,
 )
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -47,6 +52,12 @@ class CanalYoutubeCreateIn(BaseModel):
     url: str = Field(min_length=1, max_length=500)
     oficial: bool = False
     confiabilidade: int = Field(default=80, ge=0, le=100)
+
+
+class CapaSiteUpdateIn(BaseModel):
+    ativo: bool = False
+    tipo: Literal["imagem", "video"] = "imagem"
+    media_url: str | None = Field(default=None, max_length=3000)
 
 
 def _validar_admin(authorization: str | None) -> None:
@@ -140,3 +151,31 @@ def post_canal_youtube_admin(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except UniqueViolation as exc:
         raise HTTPException(status_code=409, detail="Esse canal do YouTube já está cadastrado.") from exc
+
+
+@router.get("/capa-publica")
+def get_capa_publica() -> dict:
+    return obter_capa_site()
+
+
+@router.get("/capa")
+def get_capa_admin(authorization: str | None = Header(default=None)) -> dict:
+    _validar_admin(authorization)
+    return obter_capa_site()
+
+
+@router.put("/capa")
+def put_capa_admin(
+    payload: CapaSiteUpdateIn,
+    authorization: str | None = Header(default=None),
+) -> dict:
+    _validar_admin(authorization)
+
+    try:
+        return atualizar_capa_site(
+            ativo=payload.ativo,
+            tipo=payload.tipo,
+            media_url=payload.media_url,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

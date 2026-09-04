@@ -127,6 +127,13 @@ type VideoStatus = {
   itens_por_secao: number;
 };
 
+type CapaSiteConfig = {
+  ativo: boolean;
+  tipo: "imagem" | "video";
+  media_url: string | null;
+  atualizado_em: string | null;
+};
+
 const API_URL = "/backend";
 const PAGE_SIZE = 60;
 const X_PAGE_SIZE = 20;
@@ -740,6 +747,8 @@ export default function Home() {
   const [carregandoVideos, setCarregandoVideos] = useState(false);
   const [erroVideos, setErroVideos] = useState<string | null>(null);
   const [videoAtivo, setVideoAtivo] = useState<VideoYoutube | null>(null);
+  const [capaSite, setCapaSite] = useState<CapaSiteConfig | null>(null);
+  const [capaAberta, setCapaAberta] = useState(false);
 
   async function carregarFiltros() {
     try {
@@ -837,37 +846,52 @@ export default function Home() {
     }
   }
 
-  async function carregarVideosYoutube({
-    silencioso = false,
-  }: {
-    silencioso?: boolean;
-  } = {}) {
-    if (!silencioso) {
-      setCarregandoVideos(true);
+  async function carregarVideosYoutube() {
+    if (canaisYoutubeDisponiveis.length === 0) {
+      return;
     }
 
+    setCarregandoVideos(true);
+
     try {
-      const [feedResponse, statusResponse] = await Promise.all([
-        fetch(
-          `${API_URL}/api/videos/feed?limit_por_canal=${YOUTUBE_PAGE_SIZE}`,
-          { cache: "no-store" }
-        ),
+      const carregarTipoPorCanal = async (tipo: VideoYoutube["tipo"]) => {
+        const responses = await Promise.all(
+          canaisYoutubeDisponiveis.map((fonte) =>
+            fetch(
+              `${API_URL}/api/videos?tipo=${tipo}&limit=${YOUTUBE_PAGE_SIZE}&offset=0&fonte=${encodeURIComponent(fonte.slug)}`,
+              { cache: "no-store" }
+            )
+          )
+        );
+
+        const falha = responses.find((response) => !response.ok);
+        if (falha) {
+          throw new Error(`API de vídeos respondeu ${falha.status}`);
+        }
+
+        const blocos = await Promise.all(
+          responses.map((response) => response.json() as Promise<VideoYoutube[]>)
+        );
+
+        return blocos
+          .flat()
+          .sort((a, b) => {
+            const dataA = new Date(a.publicado_em ?? a.coletado_em).getTime();
+            const dataB = new Date(b.publicado_em ?? b.coletado_em).getTime();
+            return dataB - dataA;
+          });
+      };
+
+      const [videosData, shortsData, livesData, statusResponse] = await Promise.all([
+        carregarTipoPorCanal("video"),
+        carregarTipoPorCanal("short"),
+        carregarTipoPorCanal("live"),
         fetch(`${API_URL}/api/videos/status`, { cache: "no-store" }),
       ]);
 
-      if (!feedResponse.ok) {
-        throw new Error(`API de vídeos respondeu ${feedResponse.status}`);
-      }
-
-      const data: {
-        videos: VideoYoutube[];
-        shorts: VideoYoutube[];
-        lives: VideoYoutube[];
-      } = await feedResponse.json();
-
-      setVideosYoutube(data.videos);
-      setShortsYoutube(data.shorts);
-      setLivesYoutube(data.lives);
+      setVideosYoutube(videosData);
+      setShortsYoutube(shortsData);
+      setLivesYoutube(livesData);
 
       if (statusResponse.ok) {
         setStatusVideos(await statusResponse.json());
@@ -878,9 +902,7 @@ export default function Home() {
       const mensagem = error instanceof Error ? error.message : "Falha ao carregar vídeos";
       setErroVideos(mensagem);
     } finally {
-      if (!silencioso) {
-        setCarregandoVideos(false);
-      }
+      setCarregandoVideos(false);
     }
   }
 
@@ -934,6 +956,45 @@ export default function Home() {
   }
 
   useEffect(() => {
+    let ativo = true;
+
+    fetch(`${API_URL}/api/admin/capa-publica`, { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) return null;
+        return response.json() as Promise<CapaSiteConfig>;
+      })
+      .then((data) => {
+        if (!ativo || !data) return;
+
+        setCapaSite(data);
+
+        if (data.ativo && data.media_url) {
+          setCapaAberta(true);
+        }
+      })
+      .catch(() => {
+        // A capa é opcional. Falha nela não impede o restante do site.
+      });
+
+    return () => {
+      ativo = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!capaAberta) return;
+
+    const fecharComEsc = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setCapaAberta(false);
+      }
+    };
+
+    window.addEventListener("keydown", fecharComEsc);
+    return () => window.removeEventListener("keydown", fecharComEsc);
+  }, [capaAberta]);
+
+  useEffect(() => {
     carregarFiltros();
     carregarPerfisX();
   }, []);
@@ -947,21 +1008,12 @@ export default function Home() {
   }, [categoriaSelecionada, fonteSelecionada, buscaAplicada, secaoAtiva]);
 
   useEffect(() => {
-    if (canaisYoutubeDisponiveis.length === 0) return;
+    if (secaoAtiva !== "videos" || canaisYoutubeDisponiveis.length === 0) return;
 
-    carregarVideosYoutube({ silencioso: true });
-  }, [canaisYoutubeDisponiveis]);
-
-  useEffect(() => {
-    if (secaoAtiva !== "videos") return;
-
-    const interval = window.setInterval(
-      () => carregarVideosYoutube({ silencioso: true }),
-      60_000
-    );
-
+    carregarVideosYoutube();
+    const interval = window.setInterval(() => carregarVideosYoutube(), 60_000);
     return () => window.clearInterval(interval);
-  }, [secaoAtiva]);
+  }, [secaoAtiva, canaisYoutubeDisponiveis]);
 
   useEffect(() => {
     if (secaoAtiva !== "x") return;
@@ -1045,6 +1097,49 @@ export default function Home() {
 
   return (
     <main className="page-shell">
+      {capaAberta && capaSite?.ativo && capaSite.media_url && (
+        <div
+          className="site-cover-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Capa de abertura"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setCapaAberta(false);
+            }
+          }}
+        >
+          <div className="site-cover-modal">
+            <button
+              className="site-cover-close"
+              type="button"
+              onClick={() => setCapaAberta(false)}
+              aria-label="Fechar"
+              title="Fechar"
+            >
+              ×
+            </button>
+
+            {capaSite.tipo === "video" ? (
+              <video
+                className="site-cover-media"
+                src={capaSite.media_url}
+                autoPlay
+                muted
+                playsInline
+                controls
+              />
+            ) : (
+              <img
+                className="site-cover-media"
+                src={capaSite.media_url}
+                alt="Capa da Central do Galo"
+              />
+            )}
+          </div>
+        </div>
+      )}
+
       <header className="hero">
         <div className="hero-copy">
           <div className="brand-lockup">
@@ -1550,6 +1645,59 @@ export default function Home() {
       )}
 
       <style jsx global>{`
+        .site-cover-overlay {
+          position: fixed;
+          inset: 0;
+          z-index: 99999;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 24px;
+          background: rgba(0, 0, 0, 0.82);
+          backdrop-filter: blur(6px);
+        }
+
+        .site-cover-modal {
+          position: relative;
+          width: min(100%, 980px);
+          max-height: calc(100vh - 48px);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 18px;
+          overflow: hidden;
+          background: #000;
+          box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+        }
+
+        .site-cover-media {
+          display: block;
+          width: 100%;
+          max-height: calc(100vh - 48px);
+          object-fit: contain;
+          background: #000;
+        }
+
+        .site-cover-close {
+          position: absolute;
+          top: 12px;
+          right: 12px;
+          z-index: 2;
+          width: 42px;
+          height: 42px;
+          border: 0;
+          border-radius: 999px;
+          background: rgba(0, 0, 0, 0.72);
+          color: #fff;
+          font-size: 30px;
+          line-height: 1;
+          cursor: pointer;
+        }
+
+        .site-cover-close:hover {
+          background: rgba(0, 0, 0, 0.92);
+        }
+
         .youtube-live-badge.is-live-now {
           background: #15803d !important;
           color: #ffffff !important;

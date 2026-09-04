@@ -42,6 +42,14 @@ type CanalYoutubeAdmin = {
   };
 };
 
+type CapaSiteConfig = {
+  id: number;
+  ativo: boolean;
+  tipo: "imagem" | "video";
+  media_url: string | null;
+  atualizado_em: string | null;
+};
+
 function slugify(valor: string): string {
   return valor
     .normalize("NFD")
@@ -85,6 +93,10 @@ export default function AdminPage() {
   const [oficialYoutube, setOficialYoutube] = useState(false);
   const [confiabilidadeYoutube, setConfiabilidadeYoutube] = useState(80);
 
+  const [capaAtiva, setCapaAtiva] = useState(false);
+  const [capaTipo, setCapaTipo] = useState<"imagem" | "video">("imagem");
+  const [capaMediaUrl, setCapaMediaUrl] = useState("");
+
   const [buscaCanal, setBuscaCanal] = useState("");
   const [canalSelecionado, setCanalSelecionado] = useState("");
 
@@ -121,16 +133,18 @@ export default function AdminPage() {
 
   async function carregarDados() {
     const headers = { ...authHeaders };
-    const [paginasResponse, contasResponse, canaisYoutubeResponse] = await Promise.all([
+    const [paginasResponse, contasResponse, canaisYoutubeResponse, capaResponse] = await Promise.all([
       fetch(`${API_URL}/api/admin/paginas`, { headers, cache: "no-store" }),
       fetch(`${API_URL}/api/admin/x/contas`, { headers, cache: "no-store" }),
       fetch(`${API_URL}/api/admin/youtube/canais`, { headers, cache: "no-store" }),
+      fetch(`${API_URL}/api/admin/capa`, { headers, cache: "no-store" }),
     ]);
 
     if (
       paginasResponse.status === 401 ||
       contasResponse.status === 401 ||
-      canaisYoutubeResponse.status === 401
+      canaisYoutubeResponse.status === 401 ||
+      capaResponse.status === 401
     ) {
       sair();
       return;
@@ -139,6 +153,13 @@ export default function AdminPage() {
     if (paginasResponse.ok) setPaginas(await paginasResponse.json());
     if (contasResponse.ok) setContas(await contasResponse.json());
     if (canaisYoutubeResponse.ok) setCanaisYoutube(await canaisYoutubeResponse.json());
+
+    if (capaResponse.ok) {
+      const capa: CapaSiteConfig = await capaResponse.json();
+      setCapaAtiva(capa.ativo);
+      setCapaTipo(capa.tipo);
+      setCapaMediaUrl(capa.media_url ?? "");
+    }
   }
 
   async function entrar(event: FormEvent<HTMLFormElement>) {
@@ -255,6 +276,33 @@ export default function AdminPage() {
     await carregarDados();
   }
 
+  async function salvarCapaSite(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setMensagem(null);
+
+    const response = await fetch(`${API_URL}/api/admin/capa`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...authHeaders },
+      body: JSON.stringify({
+        ativo: capaAtiva,
+        tipo: capaTipo,
+        media_url: capaMediaUrl.trim() || null,
+      }),
+    });
+
+    const body = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      setMensagem(body.detail ?? "Não foi possível salvar a capa.");
+      return;
+    }
+
+    setCapaAtiva(body.ativo);
+    setCapaTipo(body.tipo);
+    setCapaMediaUrl(body.media_url ?? "");
+    setMensagem(body.ativo ? "Capa ativada com sucesso." : "Capa salva e desativada.");
+  }
+
   if (!token) {
     return (
       <main className="admin-shell admin-login-shell">
@@ -294,12 +342,85 @@ export default function AdminPage() {
           <h1>Painel administrativo</h1>
           <p>Gerencie páginas públicas, perfis do Radar do X e canais do YouTube.</p>
         </div>
-        <button className="admin-secondary-button" type="button" onClick={sair}>Sair</button>
+        <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+          <button
+            className="admin-secondary-button"
+            type="button"
+            onClick={() => {
+              window.location.href = "/";
+            }}
+          >
+            Abrir site
+          </button>
+          <button className="admin-secondary-button" type="button" onClick={sair}>Sair</button>
+        </div>
       </header>
 
       {mensagem && <div className="admin-alert">{mensagem}</div>}
 
       <section className="admin-grid">
+        <article className="admin-panel">
+          <div className="admin-panel-heading">
+            <div>
+              <span className="eyebrow">CAPA DO SITE</span>
+              <h2>Popup de abertura</h2>
+            </div>
+            <span>{capaAtiva ? "Ativa" : "Desativada"}</span>
+          </div>
+
+          <form className="admin-form" onSubmit={salvarCapaSite}>
+            <label className="admin-check-row">
+              <input
+                type="checkbox"
+                checked={capaAtiva}
+                onChange={(event) => setCapaAtiva(event.target.checked)}
+              />
+              Exibir capa ao abrir o site
+            </label>
+
+            <label>
+              Tipo de mídia
+              <select
+                value={capaTipo}
+                onChange={(event) => setCapaTipo(event.target.value as "imagem" | "video")}
+              >
+                <option value="imagem">Imagem</option>
+                <option value="video">Vídeo</option>
+              </select>
+            </label>
+
+            <label>
+              URL da imagem ou vídeo
+              <input
+                type="url"
+                value={capaMediaUrl}
+                onChange={(event) => setCapaMediaUrl(event.target.value)}
+                placeholder="https://..."
+              />
+            </label>
+
+            {capaMediaUrl.trim() && (
+              <div className="admin-cover-preview">
+                {capaTipo === "video" ? (
+                  <video
+                    src={capaMediaUrl}
+                    muted
+                    autoPlay
+                    playsInline
+                    controls
+                  />
+                ) : (
+                  <img src={capaMediaUrl} alt="Prévia da capa" />
+                )}
+              </div>
+            )}
+
+            <button className="admin-primary-button" type="submit">
+              Salvar capa
+            </button>
+          </form>
+        </article>
+
         <article className="admin-panel">
           <div className="admin-panel-heading">
             <div>
@@ -527,6 +648,26 @@ export default function AdminPage() {
           </div>
         </article>
       </section>
+
+      <style jsx global>{`
+        .admin-cover-preview {
+          width: 100%;
+          max-height: 360px;
+          overflow: hidden;
+          border-radius: 14px;
+          background: #0b0b0b;
+          border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .admin-cover-preview img,
+        .admin-cover-preview video {
+          display: block;
+          width: 100%;
+          max-height: 360px;
+          object-fit: contain;
+          background: #0b0b0b;
+        }
+      `}</style>
     </main>
   );
 }
