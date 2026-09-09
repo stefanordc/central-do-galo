@@ -150,7 +150,7 @@ export default function AdminPage() {
   const [salvandoJogador, setSalvandoJogador] = useState(false);
   const [otimizandoFotos, setOtimizandoFotos] = useState(false);
 
-  const authHeaders = useMemo<Record<string, string>>(
+  const authHeaders = useMemo(
     () => (token ? { Authorization: `Bearer ${token}` } : {}),
     [token]
   );
