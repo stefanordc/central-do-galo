@@ -1,4 +1,4 @@
-import CentralDoGaloPage from "../components/CentralDoGaloPage";
+import CentralDoGaloPage from "../../components/CentralDoGaloPage";
 
 export default function Page() {
   return <CentralDoGaloPage initialSection="noticias" />;

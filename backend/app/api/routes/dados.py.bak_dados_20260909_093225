@@ -1,0 +1,42 @@
+from __future__ import annotations
+
+from datetime import datetime
+
+from fastapi import APIRouter, Query
+
+from app.services.dados_service import (
+    dados_coletivos,
+    dados_individuais,
+    listar_anos_disponiveis,
+    status_dados,
+)
+
+router = APIRouter(prefix="/dados", tags=["dados"])
+
+
+def _ano_padrao() -> int:
+    anos = listar_anos_disponiveis()
+    return anos[0] if anos else datetime.now().year
+
+
+@router.get("/anos")
+def get_anos() -> dict:
+    return {"anos": listar_anos_disponiveis()}
+
+
+@router.get("/status")
+def get_status(ano: int | None = Query(default=None, ge=2000, le=2100)) -> dict:
+    ano = ano or _ano_padrao()
+    return status_dados(ano)
+
+
+@router.get("/coletivos")
+def get_coletivos(ano: int | None = Query(default=None, ge=2000, le=2100)) -> dict:
+    ano = ano or _ano_padrao()
+    return dados_coletivos(ano)
+
+
+@router.get("/individual")
+def get_individual(ano: int | None = Query(default=None, ge=2000, le=2100)) -> dict:
+    ano = ano or _ano_padrao()
+    return dados_individuais(ano)

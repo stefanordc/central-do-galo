@@ -1,0 +1,2002 @@
+from __future__ import annotations
+
+import json
+import math
+from collections import defaultdict
+from datetime import datetime
+from typing import Any, Callable
+
+from app.db.pool import pool
+from app.services.jogo_service import SOFASCORE_TEAM_ID, _sofascore_get
+
+
+# -----------------------------------------------------------------------------
+# Metadados de apresentação
+# -----------------------------------------------------------------------------
+
+CATEGORIAS = ("todos", "geral", "ataque", "defesa")
+
+CAMPEONATOS_OFICIAIS = (
+    "Mineiro",
+    "Brasileiro",
+    "Copa do Brasil",
+    "Copa Libertadores",
+    "Copa Sul-Americana",
+    "Supercopa do Brasil",
+)
+
+GRUPOS_PT = {
+    "Match overview": "Visão geral",
+    "Attack": "Ataque",
+    "Defending": "Defesa",
+    "Duels": "Duelos",
+    "Goalkeeping": "Goleiro",
+    "Passes": "Passes",
+    "Shots": "Finalizações",
+}
+
+POSICOES_PT = {
+    "G": "Goleiro",
+    "D": "Defensor",
+    "M": "Meio-campista",
+    "F": "Atacante",
+}
+
+POSICOES_ORDEM = {"G": 0, "D": 1, "M": 2, "F": 3}
+
+# nome, categoria, unidade, somável
+COLETIVAS_META: dict[str, dict[str, Any]] = {
+    "avgRating": {"nome": "Nota média", "categoria": "geral", "unidade": None, "somavel": False},
+    "ballPossession": {"nome": "Posse de bola", "categoria": "geral", "unidade": "%", "somavel": False},
+    "bigChanceCreated": {"nome": "Grandes chances", "categoria": "ataque", "unidade": None, "somavel": True},
+    "cornerKicks": {"nome": "Escanteios", "categoria": "ataque", "unidade": None, "somavel": True},
+    "kilometersCovered": {"nome": "Distância percorrida", "categoria": "geral", "unidade": "km", "somavel": True},
+    "expectedGoals": {"nome": "Gols esperados (xG)", "categoria": "ataque", "unidade": None, "somavel": True},
+    "fouls": {"nome": "Faltas", "categoria": "geral", "unidade": None, "somavel": True},
+    "freeKicks": {"nome": "Tiros livres", "categoria": "geral", "unidade": None, "somavel": True},
+    "goalkeeperSaves": {"nome": "Defesas do goleiro", "categoria": "defesa", "unidade": None, "somavel": True},
+    "numberOfSprints": {"nome": "Sprints", "categoria": "geral", "unidade": None, "somavel": True},
+    "passes": {"nome": "Passes", "categoria": "geral", "unidade": None, "somavel": True},
+    "redCards": {"nome": "Cartões vermelhos", "categoria": "geral", "unidade": None, "somavel": True},
+    "totalTackle": {"nome": "Desarmes", "categoria": "defesa", "unidade": None, "somavel": True},
+    "totalShotsOnGoal": {"nome": "Finalizações", "categoria": "ataque", "unidade": None, "somavel": True},
+    "yellowCards": {"nome": "Cartões amarelos", "categoria": "geral", "unidade": None, "somavel": True},
+    "accuratePasses": {"nome": "Passes certos", "categoria": "geral", "unidade": None, "somavel": True},
+    "accurateCross": {"nome": "Cruzamentos certos", "categoria": "ataque", "unidade": None, "somavel": True},
+    "finalThirdEntries": {"nome": "Entradas no terço final", "categoria": "ataque", "unidade": None, "somavel": True},
+    "finalThirdPhaseStatistic": {"nome": "Ações no terço final", "categoria": "ataque", "unidade": None, "somavel": True},
+    "accurateLongBalls": {"nome": "Lançamentos certos", "categoria": "geral", "unidade": None, "somavel": True},
+    "throwIns": {"nome": "Laterais cobrados", "categoria": "geral", "unidade": None, "somavel": True},
+    "blockedScoringAttempt": {"nome": "Finalizações bloqueadas", "categoria": "ataque", "unidade": None, "somavel": True},
+    "expectedGoalsOnTarget": {"nome": "Gols esperados no alvo (xGOT)", "categoria": "ataque", "unidade": None, "somavel": True},
+    "hitWoodwork": {"nome": "Bolas na trave", "categoria": "ataque", "unidade": None, "somavel": True},
+    "totalShotsInsideBox": {"nome": "Finalizações dentro da área", "categoria": "ataque", "unidade": None, "somavel": True},
+    "shotsOffGoal": {"nome": "Finalizações para fora", "categoria": "ataque", "unidade": None, "somavel": True},
+    "shotsOnGoal": {"nome": "Finalizações no gol", "categoria": "ataque", "unidade": None, "somavel": True},
+    "totalShotsOutsideBox": {"nome": "Finalizações de fora da área", "categoria": "ataque", "unidade": None, "somavel": True},
+    "bigChanceMissed": {"nome": "Grandes chances perdidas", "categoria": "ataque", "unidade": None, "somavel": True},
+    "bigChanceScored": {"nome": "Grandes chances convertidas", "categoria": "ataque", "unidade": None, "somavel": True},
+    "fouledFinalThird": {"nome": "Faltas sofridas no terço final", "categoria": "ataque", "unidade": None, "somavel": True},
+    "offsides": {"nome": "Impedimentos", "categoria": "ataque", "unidade": None, "somavel": True},
+    "accurateThroughBall": {"nome": "Passes em profundidade certos", "categoria": "ataque", "unidade": None, "somavel": True},
+    "touchesInOppBox": {"nome": "Toques na área adversária", "categoria": "ataque", "unidade": None, "somavel": True},
+    "totalClearance": {"nome": "Cortes", "categoria": "defesa", "unidade": None, "somavel": True},
+    "errorsLeadToGoal": {"nome": "Erros que resultaram em gol", "categoria": "defesa", "unidade": None, "somavel": True},
+    "errorsLeadToShot": {"nome": "Erros que resultaram em finalização", "categoria": "defesa", "unidade": None, "somavel": True},
+    "interceptionWon": {"nome": "Interceptações", "categoria": "defesa", "unidade": None, "somavel": True},
+    "ballRecovery": {"nome": "Recuperações de bola", "categoria": "defesa", "unidade": None, "somavel": True},
+    "wonTacklePercent": {"nome": "Desarmes ganhos", "categoria": "defesa", "unidade": None, "somavel": True},
+    "aerialDuelsPercentage": {"nome": "Duelos aéreos ganhos", "categoria": "geral", "unidade": None, "somavel": True},
+    "dispossessed": {"nome": "Desarmes sofridos", "categoria": "geral", "unidade": None, "somavel": True},
+    "dribblesPercentage": {"nome": "Dribles certos", "categoria": "ataque", "unidade": None, "somavel": True},
+    "duelWonPercent": {"nome": "Duelos ganhos", "categoria": "geral", "unidade": "%", "somavel": False},
+    "groundDuelsPercentage": {"nome": "Duelos pelo chão ganhos", "categoria": "geral", "unidade": None, "somavel": True},
+    "diveSaves": {"nome": "Grandes defesas", "categoria": "defesa", "unidade": None, "somavel": True},
+    "goalKicks": {"nome": "Tiros de meta", "categoria": "defesa", "unidade": None, "somavel": True},
+    "goalsPrevented": {"nome": "Gols evitados", "categoria": "defesa", "unidade": None, "somavel": True},
+    "highClaims": {"nome": "Saídas do gol com a bola", "categoria": "defesa", "unidade": None, "somavel": True},
+    "punches": {"nome": "Socos na bola", "categoria": "defesa", "unidade": None, "somavel": True},
+}
+
+# nome, categoria, agregação, unidade
+INDIVIDUAIS_META: dict[str, dict[str, Any]] = {
+    "accurateCross": {"nome": "Cruzamentos certos", "categoria": "ataque", "agregacao": "soma", "unidade": None},
+    "accurateKeeperSweeper": {"nome": "Ações de líbero certas", "categoria": "defesa", "agregacao": "soma", "unidade": None},
+    "accurateLongBalls": {"nome": "Lançamentos certos", "categoria": "geral", "agregacao": "soma", "unidade": None},
+    "accurateOppositionHalfPasses": {"nome": "Passes certos no campo ofensivo", "categoria": "geral", "agregacao": "soma", "unidade": None},
+    "accurateOwnHalfPasses": {"nome": "Passes certos no campo defensivo", "categoria": "geral", "agregacao": "soma", "unidade": None},
+    "accuratePass": {"nome": "Passes certos", "categoria": "geral", "agregacao": "soma", "unidade": None},
+    "aerialLost": {"nome": "Duelos aéreos perdidos", "categoria": "geral", "agregacao": "soma", "unidade": None},
+    "aerialWon": {"nome": "Duelos aéreos ganhos", "categoria": "geral", "agregacao": "soma", "unidade": None},
+    "ballCarriesCount": {"nome": "Conduções de bola", "categoria": "geral", "agregacao": "soma", "unidade": None},
+    "ballRecovery": {"nome": "Recuperações de bola", "categoria": "defesa", "agregacao": "soma", "unidade": None},
+    "bestBallCarryProgression": {"nome": "Maior progressão em condução", "categoria": "ataque", "agregacao": "max", "unidade": "m"},
+    "bigChanceCreated": {"nome": "Grandes chances criadas", "categoria": "ataque", "agregacao": "soma", "unidade": None},
+    "bigChanceMissed": {"nome": "Grandes chances perdidas", "categoria": "ataque", "agregacao": "soma", "unidade": None},
+    "blockedScoringAttempt": {"nome": "Finalizações bloqueadas", "categoria": "ataque", "agregacao": "soma", "unidade": None},
+    "challengeLost": {"nome": "Duelos defensivos perdidos", "categoria": "defesa", "agregacao": "soma", "unidade": None},
+    "clearanceOffLine": {"nome": "Cortes em cima da linha", "categoria": "defesa", "agregacao": "soma", "unidade": None},
+    "dispossessed": {"nome": "Desarmes sofridos", "categoria": "geral", "agregacao": "soma", "unidade": None},
+    "duelLost": {"nome": "Duelos perdidos", "categoria": "geral", "agregacao": "soma", "unidade": None},
+    "duelWon": {"nome": "Duelos ganhos", "categoria": "geral", "agregacao": "soma", "unidade": None},
+    "errorLeadToAGoal": {"nome": "Erros que resultaram em gol", "categoria": "defesa", "agregacao": "soma", "unidade": None},
+    "errorLeadToAShot": {"nome": "Erros que resultaram em finalização", "categoria": "defesa", "agregacao": "soma", "unidade": None},
+    "expectedAssists": {"nome": "Assistências esperadas (xA)", "categoria": "ataque", "agregacao": "soma", "unidade": None},
+    "expectedGoals": {"nome": "Gols esperados (xG)", "categoria": "ataque", "agregacao": "soma", "unidade": None},
+    "expectedGoalsOnTarget": {"nome": "Gols esperados no alvo (xGOT)", "categoria": "ataque", "agregacao": "soma", "unidade": None},
+    "fouls": {"nome": "Faltas cometidas", "categoria": "geral", "agregacao": "soma", "unidade": None},
+    "goalAssist": {"nome": "Assistências", "categoria": "ataque", "agregacao": "soma", "unidade": None},
+    "goals": {"nome": "Gols", "categoria": "ataque", "agregacao": "soma", "unidade": None},
+    "goalsPrevented": {"nome": "Gols evitados", "categoria": "defesa", "agregacao": "soma", "unidade": None},
+    "goodHighClaim": {"nome": "Saídas do gol com a bola", "categoria": "defesa", "agregacao": "soma", "unidade": None},
+    "hitWoodwork": {"nome": "Bolas na trave", "categoria": "ataque", "agregacao": "soma", "unidade": None},
+    "interceptionWon": {"nome": "Interceptações", "categoria": "defesa", "agregacao": "soma", "unidade": None},
+    "keyPass": {"nome": "Passes-chave", "categoria": "ataque", "agregacao": "soma", "unidade": None},
+    "kilometersCovered": {"nome": "Distância percorrida", "categoria": "geral", "agregacao": "soma", "unidade": "km"},
+    "lastManTackle": {"nome": "Desarmes como último homem", "categoria": "defesa", "agregacao": "soma", "unidade": None},
+    "metersCoveredHighSpeedRunningKm": {"nome": "Distância em alta intensidade", "categoria": "geral", "agregacao": "soma", "unidade": "km"},
+    "metersCoveredRunningKm": {"nome": "Distância correndo", "categoria": "geral", "agregacao": "soma", "unidade": "km"},
+    "metersCoveredSprintingKm": {"nome": "Distância em sprint", "categoria": "geral", "agregacao": "soma", "unidade": "km"},
+    "numberOfSprints": {"nome": "Sprints", "categoria": "geral", "agregacao": "soma", "unidade": None},
+    "onTargetScoringAttempt": {"nome": "Finalizações no gol", "categoria": "ataque", "agregacao": "soma", "unidade": None},
+    "outfielderBlock": {"nome": "Bloqueios", "categoria": "defesa", "agregacao": "soma", "unidade": None},
+    "ownGoals": {"nome": "Gols contra", "categoria": "defesa", "agregacao": "soma", "unidade": None},
+    "penaltyConceded": {"nome": "Pênaltis cometidos", "categoria": "defesa", "agregacao": "soma", "unidade": None},
+    "penaltyFaced": {"nome": "Pênaltis enfrentados", "categoria": "defesa", "agregacao": "soma", "unidade": None},
+    "penaltyShootoutGoal": {"nome": "Pênaltis convertidos em disputa", "categoria": "ataque", "agregacao": "soma", "unidade": None},
+    "penaltyShootoutMiss": {"nome": "Pênaltis perdidos em disputa", "categoria": "ataque", "agregacao": "soma", "unidade": None},
+    "penaltyShootoutSave": {"nome": "Pênaltis defendidos em disputa", "categoria": "defesa", "agregacao": "soma", "unidade": None},
+    "penaltyWon": {"nome": "Pênaltis sofridos", "categoria": "ataque", "agregacao": "soma", "unidade": None},
+    "possessionLostCtrl": {"nome": "Perdas de posse", "categoria": "geral", "agregacao": "soma", "unidade": None},
+    "progressiveBallCarriesCount": {"nome": "Conduções progressivas", "categoria": "ataque", "agregacao": "soma", "unidade": None},
+    "punches": {"nome": "Socos na bola", "categoria": "defesa", "agregacao": "soma", "unidade": None},
+    "savedShotsFromInsideTheBox": {"nome": "Defesas em finalizações dentro da área", "categoria": "defesa", "agregacao": "soma", "unidade": None},
+    "saves": {"nome": "Defesas", "categoria": "defesa", "agregacao": "soma", "unidade": None},
+    "shotOffTarget": {"nome": "Finalizações para fora", "categoria": "ataque", "agregacao": "soma", "unidade": None},
+    "topSpeed": {"nome": "Velocidade máxima", "categoria": "geral", "agregacao": "max", "unidade": "km/h"},
+    "totalBallCarriesDistance": {"nome": "Distância em conduções", "categoria": "geral", "agregacao": "soma", "unidade": "m"},
+    "totalClearance": {"nome": "Cortes", "categoria": "defesa", "agregacao": "soma", "unidade": None},
+    "totalContest": {"nome": "Dribles tentados", "categoria": "ataque", "agregacao": "soma", "unidade": None},
+    "totalCross": {"nome": "Cruzamentos", "categoria": "ataque", "agregacao": "soma", "unidade": None},
+    "totalKeeperSweeper": {"nome": "Ações de líbero", "categoria": "defesa", "agregacao": "soma", "unidade": None},
+    "totalLongBalls": {"nome": "Lançamentos", "categoria": "geral", "agregacao": "soma", "unidade": None},
+    "totalOffside": {"nome": "Impedimentos", "categoria": "ataque", "agregacao": "soma", "unidade": None},
+    "totalOppositionHalfPasses": {"nome": "Passes no campo ofensivo", "categoria": "geral", "agregacao": "soma", "unidade": None},
+    "totalOwnHalfPasses": {"nome": "Passes no campo defensivo", "categoria": "geral", "agregacao": "soma", "unidade": None},
+    "totalPass": {"nome": "Passes", "categoria": "geral", "agregacao": "soma", "unidade": None},
+    "totalProgressiveBallCarriesDistance": {"nome": "Distância em conduções progressivas", "categoria": "ataque", "agregacao": "soma", "unidade": "m"},
+    "totalShots": {"nome": "Finalizações", "categoria": "ataque", "agregacao": "soma", "unidade": None},
+    "totalTackle": {"nome": "Desarmes", "categoria": "defesa", "agregacao": "soma", "unidade": None},
+    "touches": {"nome": "Toques na bola", "categoria": "geral", "agregacao": "soma", "unidade": None},
+    "unsuccessfulTouch": {"nome": "Domínios errados", "categoria": "geral", "agregacao": "soma", "unidade": None},
+    "wasFouled": {"nome": "Faltas sofridas", "categoria": "geral", "agregacao": "soma", "unidade": None},
+    "wonContest": {"nome": "Dribles certos", "categoria": "ataque", "agregacao": "soma", "unidade": None},
+    "wonTackle": {"nome": "Desarmes ganhos", "categoria": "defesa", "agregacao": "soma", "unidade": None},
+}
+
+
+# -----------------------------------------------------------------------------
+# Conversões e filtros SQL
+# -----------------------------------------------------------------------------
+
+def _to_number(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        number = float(value)
+        return number if math.isfinite(number) else None
+
+    text = str(value).strip()
+    if not text:
+        return None
+
+    text = (
+        text.replace("%", "")
+        .replace("km/h", "")
+        .replace("km", "")
+        .replace("m", "")
+        .replace(" ", "")
+        .replace(",", ".")
+    )
+    try:
+        number = float(text)
+        return number if math.isfinite(number) else None
+    except ValueError:
+        return None
+
+
+def _round_value(value: float | None, digits: int = 2) -> float | None:
+    if value is None:
+        return None
+    rounded = round(float(value), digits)
+    if rounded == int(rounded):
+        return float(int(rounded))
+    return rounded
+
+
+def _ano_expr() -> str:
+    return "extract(year from (j.inicio_em at time zone 'America/Sao_Paulo'))::int"
+
+
+def _filtros_where(
+    temporada: int | None = None,
+    campeonato: str | None = None,
+    *,
+    alias_jogo: str = "j",
+    alias_competicao: str = "c",
+) -> tuple[str, list[Any]]:
+    clausulas = [
+        f"{alias_jogo}.status = 'finalizado'",
+        f"{alias_jogo}.id_externo like 'sofascore:%%'",
+        f"{alias_competicao}.nome in ({', '.join(['%s'] * len(CAMPEONATOS_OFICIAIS))})",
+    ]
+    params: list[Any] = list(CAMPEONATOS_OFICIAIS)
+
+    if temporada is not None:
+        clausulas.append(
+            f"extract(year from ({alias_jogo}.inicio_em at time zone 'America/Sao_Paulo'))::int = %s"
+        )
+        params.append(int(temporada))
+
+    if campeonato:
+        clausulas.append(f"{alias_competicao}.nome = %s")
+        params.append(campeonato)
+
+    return " and ".join(clausulas), params
+
+
+def listar_temporadas_disponiveis() -> list[int]:
+    sql = f"""
+        select distinct {_ano_expr()} as temporada
+        from public.jogos j
+        join public.estatisticas_jogos_sofascore e on e.jogo_id = j.id
+        where j.status = 'finalizado'
+          and j.id_externo like 'sofascore:%%'
+          and {_ano_expr()} >= 2020
+        order by temporada desc
+    """
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql)
+            return [int(row[0]) for row in cur.fetchall() if row[0] is not None]
+
+
+def _anos_jogador_label() -> dict[int, dict[str, Any]]:
+    sql = f"""
+        select
+            p.jogador_id,
+            coalesce(nullif(max(p.nome_guerra), ''), max(p.nome)) as nome_guerra,
+            array_agg(distinct {_ano_expr()} order by {_ano_expr()}) as temporadas
+        from public.estatisticas_jogadores_sofascore p
+        join public.jogos j on j.id = p.jogo_id
+        where j.status = 'finalizado'
+          and {_ano_expr()} >= 2020
+        group by p.jogador_id
+    """
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql)
+            rows = cur.fetchall()
+
+    base: dict[int, dict[str, Any]] = {}
+    por_nome: dict[str, list[int]] = defaultdict(list)
+    for jogador_id, nome_guerra, temporadas in rows:
+        jid = int(jogador_id)
+        nome = str(nome_guerra or "Jogador")
+        anos = [int(ano) for ano in (temporadas or []) if ano is not None]
+        base[jid] = {"nome_guerra": nome, "temporadas": anos}
+        por_nome[nome.casefold()].append(jid)
+
+    for ids in por_nome.values():
+        duplicado = len(set(ids)) > 1
+        for jid in ids:
+            item = base[jid]
+            anos = item["temporadas"]
+            if duplicado and anos:
+                ano_texto = str(anos[0]) if len(anos) == 1 else f"{anos[0]}–{anos[-1]}"
+                item["rotulo"] = f"{item['nome_guerra']} ({ano_texto})"
+            else:
+                item["rotulo"] = item["nome_guerra"]
+    return base
+
+
+def listar_filtros_dados(
+    temporada: int | None = None,
+    campeonato: str | None = None,
+) -> dict[str, Any]:
+    chave_cache = ("filtros", temporada or 0, campeonato or "")
+    cache = _cache_comparacao_get(chave_cache)
+    if cache is not None:
+        return cache
+
+    temporadas = listar_temporadas_disponiveis()
+    if temporada is None:
+        temporada = temporadas[0] if temporadas else datetime.now().year
+
+    where, params = _filtros_where(temporada, None)
+    sql_campeonatos = f"""
+        select distinct c.nome
+        from public.jogos j
+        join public.estatisticas_jogos_sofascore e on e.jogo_id = j.id
+        left join public.competicoes c on c.id = j.competicao_id
+        where {where}
+          and c.nome is not null
+        order by c.nome
+    """
+
+    where_ind, params_ind = _filtros_where(temporada, campeonato)
+    sql_jogadores = f"""
+        select distinct p.jogador_id, coalesce(nullif(p.nome_guerra, ''), p.nome), p.posicao
+        from public.estatisticas_jogadores_sofascore p
+        join public.jogos j on j.id = p.jogo_id
+        left join public.competicoes c on c.id = j.competicao_id
+        where {where_ind}
+        order by 2
+    """
+
+    sql_adversarios = f"""
+        select distinct
+            case when e.lado_galo = 'home'
+                then (j.metadados->'sofascore'->'team_ids'->>'away')::bigint
+                else (j.metadados->'sofascore'->'team_ids'->>'home')::bigint
+            end as adversario_id,
+            case when e.lado_galo = 'home' then j.visitante else j.mandante end as adversario
+        from public.estatisticas_jogos_sofascore e
+        join public.jogos j on j.id = e.jogo_id
+        left join public.competicoes c on c.id = j.competicao_id
+        where {where_ind}
+        order by adversario
+    """
+
+    labels = _anos_jogador_label()
+
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql_campeonatos, params)
+            encontrados = {row[0] for row in cur.fetchall() if row[0]}
+            campeonatos = [nome for nome in CAMPEONATOS_OFICIAIS if nome in encontrados]
+
+            cur.execute(sql_jogadores, params_ind)
+            jogadores_rows = cur.fetchall()
+
+            cur.execute(sql_adversarios, params_ind)
+            adversarios_rows = cur.fetchall()
+
+    jogadores = []
+    posicoes: dict[str, str] = {}
+    for jogador_id, nome, posicao in jogadores_rows:
+        jid = int(jogador_id)
+        info = labels.get(jid, {})
+        jogadores.append(
+            {
+                "id": jid,
+                "nome_guerra": info.get("nome_guerra") or str(nome),
+                "rotulo": info.get("rotulo") or str(nome),
+            }
+        )
+        if posicao:
+            posicoes[str(posicao)] = POSICOES_PT.get(str(posicao), str(posicao))
+
+    jogadores.sort(key=lambda x: x["rotulo"].casefold())
+    posicoes_lista = [
+        {"codigo": codigo, "nome": nome}
+        for codigo, nome in sorted(
+            posicoes.items(),
+            key=lambda item: POSICOES_ORDEM.get(item[0], 99),
+        )
+    ]
+
+    adversarios = [
+        {"id": int(adversario_id), "nome": adversario}
+        for adversario_id, adversario in adversarios_rows
+        if adversario_id is not None and adversario
+    ]
+
+    return {
+        "temporadas": temporadas,
+        "campeonatos": campeonatos,
+        "jogadores": jogadores,
+        "posicoes": posicoes_lista,
+        "adversarios": adversarios,
+    }
+
+
+# -----------------------------------------------------------------------------
+# Coleta SofaScore
+# -----------------------------------------------------------------------------
+
+def _jogos_para_coleta(ano: int, forcar: bool = False) -> list[dict[str, Any]]:
+    pendencia = "" if forcar else """
+        and (
+            e.jogo_id is null
+            or not exists (
+                select 1
+                from public.estatisticas_jogadores_sofascore p0
+                where p0.jogo_id = j.id
+            )
+        )
+    """
+
+    sql = f"""
+        select
+            j.id,
+            j.id_externo,
+            j.mandante,
+            j.visitante,
+            j.metadados,
+            j.inicio_em
+        from public.jogos j
+        left join public.estatisticas_jogos_sofascore e on e.jogo_id = j.id
+        where j.status = 'finalizado'
+          and j.id_externo like 'sofascore:%%'
+          and {_ano_expr()} = %s
+          {pendencia}
+        order by j.inicio_em asc
+    """
+
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (ano,))
+            colunas = [desc.name for desc in cur.description]
+            return [dict(zip(colunas, row, strict=True)) for row in cur.fetchall()]
+
+
+def _event_id(jogo: dict[str, Any]) -> int | None:
+    metadados = jogo.get("metadados") or {}
+    if isinstance(metadados, str):
+        try:
+            metadados = json.loads(metadados)
+        except Exception:
+            metadados = {}
+
+    event_id = ((metadados.get("sofascore") or {}).get("event_id"))
+    if event_id is None:
+        externo = str(jogo.get("id_externo") or "")
+        if externo.startswith("sofascore:"):
+            event_id = externo.split(":", 1)[1]
+
+    try:
+        return int(event_id)
+    except (TypeError, ValueError):
+        return None
+
+
+def _lado_galo(jogo: dict[str, Any]) -> str:
+    metadados = jogo.get("metadados") or {}
+    if isinstance(metadados, str):
+        try:
+            metadados = json.loads(metadados)
+        except Exception:
+            metadados = {}
+
+    team_ids = ((metadados.get("sofascore") or {}).get("team_ids") or {})
+    if team_ids.get("home") == SOFASCORE_TEAM_ID:
+        return "home"
+    if team_ids.get("away") == SOFASCORE_TEAM_ID:
+        return "away"
+
+    nome_home = str(jogo.get("mandante") or "").lower()
+    if "atlético mineiro" in nome_home or "atletico mineiro" in nome_home:
+        return "home"
+    return "away"
+
+
+def _upsert_estatisticas_jogo(
+    jogo_id: str,
+    event_id: int,
+    lado_galo: str,
+    payload: dict[str, Any],
+) -> None:
+    sql = """
+        insert into public.estatisticas_jogos_sofascore (
+            jogo_id, event_id, lado_galo, estatisticas, coletado_em, atualizado_em
+        )
+        values (%(jogo_id)s, %(event_id)s, %(lado_galo)s, %(estatisticas)s::jsonb, now(), now())
+        on conflict (jogo_id) do update
+        set event_id = excluded.event_id,
+            lado_galo = excluded.lado_galo,
+            estatisticas = excluded.estatisticas,
+            atualizado_em = now()
+    """
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                sql,
+                {
+                    "jogo_id": jogo_id,
+                    "event_id": event_id,
+                    "lado_galo": lado_galo,
+                    "estatisticas": json.dumps(payload, ensure_ascii=False),
+                },
+            )
+        conn.commit()
+
+
+def _salvar_jogadores_lineup(
+    jogo_id: str,
+    event_id: int,
+    lado_galo: str,
+    payload: dict[str, Any],
+) -> int:
+    bloco = payload.get(lado_galo) or {}
+    players = bloco.get("players") or []
+    if not isinstance(players, list):
+        players = []
+
+    sql_delete = "delete from public.estatisticas_jogadores_sofascore where jogo_id = %s"
+    sql_insert = """
+        insert into public.estatisticas_jogadores_sofascore (
+            jogo_id, event_id, jogador_id, nome, nome_guerra, posicao, camisa, titular,
+            estatisticas, coletado_em, atualizado_em
+        )
+        values (
+            %(jogo_id)s, %(event_id)s, %(jogador_id)s, %(nome)s, %(nome_guerra)s,
+            %(posicao)s, %(camisa)s, %(titular)s, %(estatisticas)s::jsonb, now(), now()
+        )
+        on conflict (jogo_id, jogador_id) do update
+        set nome = excluded.nome,
+            nome_guerra = excluded.nome_guerra,
+            posicao = excluded.posicao,
+            camisa = excluded.camisa,
+            titular = excluded.titular,
+            estatisticas = excluded.estatisticas,
+            atualizado_em = now()
+    """
+
+    linhas: list[dict[str, Any]] = []
+    for item in players:
+        if not isinstance(item, dict):
+            continue
+        player = item.get("player") or {}
+        jogador_id = player.get("id")
+        nome = player.get("name") or player.get("shortName")
+        nome_guerra = player.get("shortName") or player.get("name")
+        if jogador_id is None or not nome:
+            continue
+
+        statistics = item.get("statistics") or {}
+        camisa = item.get("shirtNumber")
+        try:
+            camisa = int(camisa) if camisa not in (None, "") else None
+        except (TypeError, ValueError):
+            camisa = None
+
+        linhas.append(
+            {
+                "jogo_id": jogo_id,
+                "event_id": event_id,
+                "jogador_id": int(jogador_id),
+                "nome": str(nome),
+                "nome_guerra": str(nome_guerra or nome),
+                "posicao": player.get("position") or item.get("position"),
+                "camisa": camisa,
+                "titular": not bool(item.get("substitute", False)),
+                "estatisticas": json.dumps(statistics, ensure_ascii=False),
+            }
+        )
+
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql_delete, (jogo_id,))
+            for linha in linhas:
+                cur.execute(sql_insert, linha)
+        conn.commit()
+
+    return len(linhas)
+
+
+def sincronizar_estatisticas_sofascore(
+    ano: int,
+    *,
+    forcar: bool = False,
+    limite: int | None = None,
+) -> dict[str, Any]:
+    jogos = _jogos_para_coleta(ano, forcar=forcar)
+    if limite is not None:
+        jogos = jogos[: max(0, int(limite))]
+
+    processados = 0
+    jogadores_salvos = 0
+    erros: list[str] = []
+
+    for jogo in jogos:
+        event_id = _event_id(jogo)
+        if event_id is None:
+            erros.append(f"jogo {jogo.get('id')}: event_id ausente")
+            continue
+
+        lado = _lado_galo(jogo)
+        try:
+            estatisticas = _sofascore_get(f"/event/{event_id}/statistics")
+            lineups = _sofascore_get(f"/event/{event_id}/lineups")
+
+            _upsert_estatisticas_jogo(str(jogo["id"]), event_id, lado, estatisticas)
+            jogadores_salvos += _salvar_jogadores_lineup(
+                str(jogo["id"]), event_id, lado, lineups
+            )
+            processados += 1
+        except Exception as exc:
+            erros.append(f"{event_id}: {exc}")
+
+    return {
+        "fonte": "sofascore",
+        "ano": ano,
+        "encontrados": len(jogos),
+        "processados": processados,
+        "jogadores_salvos": jogadores_salvos,
+        "erros": erros,
+    }
+
+
+# -----------------------------------------------------------------------------
+# Leitura e agregação coletiva
+# -----------------------------------------------------------------------------
+
+def status_dados(temporada: int, campeonato: str | None = None) -> dict[str, Any]:
+    where, params = _filtros_where(temporada, campeonato)
+    sql = f"""
+        select
+            count(*) as jogos_finalizados,
+            count(e.jogo_id) as jogos_com_estatisticas,
+            max(e.atualizado_em) as atualizado_em
+        from public.jogos j
+        left join public.estatisticas_jogos_sofascore e on e.jogo_id = j.id
+        left join public.competicoes c on c.id = j.competicao_id
+        where {where}
+    """
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            row = cur.fetchone()
+
+    total = int(row[0] or 0)
+    coletados = int(row[1] or 0)
+    return {
+        "temporada": temporada,
+        "campeonato": campeonato,
+        "jogos_finalizados": total,
+        "jogos_com_estatisticas": coletados,
+        "pendentes": max(0, total - coletados),
+        "atualizado_em": row[2].isoformat() if row and row[2] else None,
+    }
+
+
+def _linhas_estatisticas_coletivas(
+    temporada: int | None = None,
+    campeonato: str | None = None,
+    adversario_id: int | None = None,
+) -> list[dict[str, Any]]:
+    where, params = _filtros_where(temporada, campeonato)
+    filtro_adversario = ""
+    if adversario_id is not None:
+        filtro_adversario = """
+          and case when e.lado_galo = 'home'
+                then (j.metadados->'sofascore'->'team_ids'->>'away')::bigint
+                else (j.metadados->'sofascore'->'team_ids'->>'home')::bigint
+              end = %s
+        """
+        params.append(int(adversario_id))
+
+    sql = f"""
+        select
+            e.estatisticas,
+            e.lado_galo,
+            j.gols_mandante,
+            j.gols_visitante,
+            j.inicio_em,
+            c.nome as campeonato,
+            case when e.lado_galo = 'home'
+                then (j.metadados->'sofascore'->'team_ids'->>'away')::bigint
+                else (j.metadados->'sofascore'->'team_ids'->>'home')::bigint
+            end as adversario_id,
+            case when e.lado_galo = 'home' then j.visitante else j.mandante end as adversario
+        from public.estatisticas_jogos_sofascore e
+        join public.jogos j on j.id = e.jogo_id
+        left join public.competicoes c on c.id = j.competicao_id
+        where {where}
+          {filtro_adversario}
+        order by j.inicio_em asc
+    """
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            colunas = [desc.name for desc in cur.description]
+            return [dict(zip(colunas, row, strict=True)) for row in cur.fetchall()]
+
+
+def _item_value(item: dict[str, Any], lado: str) -> float | None:
+    return _to_number(item.get(f"{lado}Value")) or _to_number(item.get(lado))
+
+
+def _periodo_all(payload: dict[str, Any]) -> dict[str, Any]:
+    periods = payload.get("statistics") or []
+    if not isinstance(periods, list) or not periods:
+        return {}
+    return next(
+        (p for p in periods if str(p.get("period") or "").upper() == "ALL"),
+        periods[0],
+    )
+
+
+def _extrair_metricas_lado(payload: dict[str, Any], lado: str) -> dict[str, dict[str, Any]]:
+    period_all = _periodo_all(payload)
+    resultado: dict[str, dict[str, Any]] = {}
+
+    for group in period_all.get("groups") or []:
+        group_name = str(group.get("groupName") or "Match overview")
+        for item in group.get("statisticsItems") or []:
+            if not isinstance(item, dict):
+                continue
+            key = str(item.get("key") or item.get("name") or "").strip()
+            if not key or key not in COLETIVAS_META or key in resultado:
+                continue
+
+            value = _item_value(item, lado)
+            if value is None:
+                continue
+
+            meta = COLETIVAS_META[key]
+            resultado[key] = {
+                "chave": key,
+                "nome": meta["nome"],
+                "categoria": meta["categoria"],
+                "grupo": GRUPOS_PT.get(group_name, "Visão geral"),
+                "unidade": meta.get("unidade"),
+                "somavel": bool(meta.get("somavel", True)),
+                "valor": value,
+            }
+
+    return resultado
+
+
+def _agregar_metricas_coletivas(
+    rows: list[dict[str, Any]],
+    lado_resolver: Callable[[dict[str, Any]], str],
+) -> list[dict[str, Any]]:
+    buckets: dict[str, dict[str, Any]] = {}
+
+    for row in rows:
+        payload = row.get("estatisticas") or {}
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except Exception:
+                payload = {}
+
+        lado = lado_resolver(row)
+        metricas_jogo = _extrair_metricas_lado(payload, lado)
+        for key, metrica in metricas_jogo.items():
+            bucket = buckets.setdefault(
+                key,
+                {
+                    "chave": key,
+                    "nome": metrica["nome"],
+                    "categoria": metrica["categoria"],
+                    "grupo": metrica["grupo"],
+                    "unidade": metrica["unidade"],
+                    "somavel": metrica["somavel"],
+                    "soma": 0.0,
+                    "contagem": 0,
+                },
+            )
+            bucket["soma"] += float(metrica["valor"])
+            bucket["contagem"] += 1
+
+    resultado = []
+    for bucket in buckets.values():
+        count = int(bucket["contagem"])
+        media = bucket["soma"] / count if count else 0.0
+        por_minuto = (bucket["soma"] / (count * 90)) if bucket["somavel"] and count else None
+        resultado.append(
+            {
+                "chave": bucket["chave"],
+                "nome": bucket["nome"],
+                "categoria": bucket["categoria"],
+                "grupo": bucket["grupo"],
+                "unidade": bucket["unidade"],
+                "media": _round_value(media),
+                "por_minuto": _round_value(por_minuto, 4),
+                "total": _round_value(bucket["soma"]) if bucket["somavel"] else None,
+            }
+        )
+
+    resultado.sort(key=lambda x: (x["categoria"], x["grupo"], x["nome"]))
+    return resultado
+
+
+def _resumo_galo(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    vitorias = empates = derrotas = 0
+    gols_pro = gols_contra = 0
+
+    for row in rows:
+        lado = row["lado_galo"]
+        gm = row.get("gols_mandante")
+        gv = row.get("gols_visitante")
+        if gm is None or gv is None:
+            continue
+        pro = int(gm if lado == "home" else gv)
+        contra = int(gv if lado == "home" else gm)
+        gols_pro += pro
+        gols_contra += contra
+        if pro > contra:
+            vitorias += 1
+        elif pro == contra:
+            empates += 1
+        else:
+            derrotas += 1
+
+    jogos = len(rows)
+    pontos = vitorias * 3 + empates
+    aproveitamento = round((pontos / (jogos * 3) * 100), 1) if jogos else 0.0
+    minutos = jogos * 90
+    return {
+        "jogos": jogos,
+        "vitorias": vitorias,
+        "empates": empates,
+        "derrotas": derrotas,
+        "gols_pro": gols_pro,
+        "gols_contra": gols_contra,
+        "gols_por_jogo": _round_value(gols_pro / jogos if jogos else 0),
+        "gols_por_minuto": _round_value(gols_pro / minutos if minutos else 0, 4),
+        "gols_sofridos_por_jogo": _round_value(gols_contra / jogos if jogos else 0),
+        "gols_sofridos_por_minuto": _round_value(gols_contra / minutos if minutos else 0, 4),
+        "aproveitamento": aproveitamento,
+    }
+
+
+def dados_coletivos(
+    temporada: int,
+    campeonato: str | None = None,
+) -> dict[str, Any]:
+    rows = _linhas_estatisticas_coletivas(temporada, campeonato)
+    return {
+        "temporada": temporada,
+        "campeonato": campeonato,
+        "resumo": _resumo_galo(rows),
+        "metricas": _agregar_metricas_coletivas(rows, lambda row: row["lado_galo"]),
+    }
+
+
+# -----------------------------------------------------------------------------
+# Individual
+# -----------------------------------------------------------------------------
+
+def _linhas_individuais(
+    temporada: int,
+    campeonato: str | None = None,
+    jogador_id: int | None = None,
+    posicao: str | None = None,
+) -> list[dict[str, Any]]:
+    where, params = _filtros_where(temporada, campeonato)
+    extras = []
+    if jogador_id is not None:
+        extras.append("p.jogador_id = %s")
+        params.append(int(jogador_id))
+    if posicao:
+        extras.append("p.posicao = %s")
+        params.append(posicao)
+
+    extra_sql = ""
+    if extras:
+        extra_sql = " and " + " and ".join(extras)
+
+    sql = f"""
+        select
+            p.jogador_id,
+            p.nome,
+            coalesce(nullif(p.nome_guerra, ''), p.nome) as nome_guerra,
+            p.posicao,
+            p.camisa,
+            p.titular,
+            p.estatisticas,
+            j.inicio_em
+        from public.estatisticas_jogadores_sofascore p
+        join public.jogos j on j.id = p.jogo_id
+        left join public.competicoes c on c.id = j.competicao_id
+        where {where}
+          {extra_sql}
+        order by j.inicio_em asc
+    """
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            colunas = [desc.name for desc in cur.description]
+            return [dict(zip(colunas, row, strict=True)) for row in cur.fetchall()]
+
+
+def _agregar_individual(
+    rows: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    labels = _anos_jogador_label()
+    jogadores: dict[int, dict[str, Any]] = {}
+    chaves_presentes: set[str] = set()
+
+    for row in rows:
+        stats = row.get("estatisticas") or {}
+        if isinstance(stats, str):
+            try:
+                stats = json.loads(stats)
+            except Exception:
+                stats = {}
+        if not isinstance(stats, dict) or not stats:
+            continue
+
+        jogador_id = int(row["jogador_id"])
+        label_info = labels.get(jogador_id, {})
+        item = jogadores.setdefault(
+            jogador_id,
+            {
+                "jogador_id": jogador_id,
+                "nome": row.get("nome"),
+                "nome_guerra": row.get("nome_guerra") or row.get("nome"),
+                "rotulo": label_info.get("rotulo") or row.get("nome_guerra") or row.get("nome"),
+                "posicao": row.get("posicao"),
+                "posicao_nome": POSICOES_PT.get(str(row.get("posicao") or ""), row.get("posicao") or "—"),
+                "camisa": row.get("camisa"),
+                "jogos": 0,
+                "titular": 0,
+                "minutos": 0.0,
+                "rating_soma": 0.0,
+                "rating_count": 0,
+                "metricas": {},
+                "metricas_count": defaultdict(int),
+            },
+        )
+
+        item["jogos"] += 1
+        if row.get("titular"):
+            item["titular"] += 1
+
+        minutos = _to_number(stats.get("minutesPlayed"))
+        if minutos is not None:
+            item["minutos"] += minutos
+
+        rating = _to_number(stats.get("rating"))
+        if rating is not None:
+            item["rating_soma"] += rating
+            item["rating_count"] += 1
+
+        for key, meta in INDIVIDUAIS_META.items():
+            value = _to_number(stats.get(key))
+            if value is None:
+                continue
+            chaves_presentes.add(key)
+            current = item["metricas"].get(key)
+            if meta["agregacao"] == "max":
+                item["metricas"][key] = value if current is None else max(current, value)
+            else:
+                item["metricas"][key] = (current or 0.0) + value
+            item["metricas_count"][key] += 1
+
+    resultado: list[dict[str, Any]] = []
+    for item in jogadores.values():
+        metricas: dict[str, float | None] = {}
+        for key, value in item["metricas"].items():
+            meta = INDIVIDUAIS_META[key]
+            if meta["agregacao"] == "media":
+                count = item["metricas_count"].get(key, 0)
+                final = value / count if count else None
+            else:
+                final = value
+            metricas[key] = _round_value(final)
+
+        nota_media = (
+            round(item["rating_soma"] / item["rating_count"], 2)
+            if item["rating_count"]
+            else None
+        )
+        jogos_item = int(item["jogos"])
+        minutos_item = float(item["minutos"])
+
+        # Indicadores derivados mais usados em análise de desempenho.
+        # Mantemos o total original e acrescentamos taxas por jogo e por minuto.
+        derivados_base = (
+            "goals",
+            "goalAssist",
+            "totalShots",
+            "onTargetScoringAttempt",
+            "totalPass",
+            "accuratePass",
+            "ballCarriesCount",
+            "progressiveBallCarriesCount",
+            "totalContest",
+            "wonContest",
+            "totalTackle",
+            "interceptionWon",
+            "ballRecovery",
+        )
+        for key in derivados_base:
+            valor = metricas.get(key)
+            if valor is None:
+                continue
+            metricas[f"{key}__por_jogo"] = _round_value(float(valor) / jogos_item if jogos_item else 0)
+            metricas[f"{key}__por_minuto"] = _round_value(float(valor) / minutos_item if minutos_item else 0, 4)
+
+        resultado.append(
+            {
+                "jogador_id": item["jogador_id"],
+                "nome": item["nome"],
+                "nome_guerra": item["nome_guerra"],
+                "rotulo": item["rotulo"],
+                "posicao": item["posicao"],
+                "posicao_nome": item["posicao_nome"],
+                "camisa": item["camisa"],
+                "foto_url": f"https://img.sofascore.com/api/v1/player/{item['jogador_id']}/image",
+                "jogos": jogos_item,
+                "titular": int(item["titular"]),
+                "minutos": int(round(item["minutos"])),
+                "nota_media": nota_media,
+                "soma_rating": _round_value(item["rating_soma"]),
+                "metricas": metricas,
+            }
+        )
+
+    resultado.sort(
+        key=lambda x: (
+            POSICOES_ORDEM.get(str(x.get("posicao") or ""), 99),
+            -x["minutos"],
+            str(x["rotulo"]).casefold(),
+        )
+    )
+
+    ordem_base = [
+        # Gols e assistências
+        "goals", "goalAssist", "expectedGoals", "expectedAssists",
+        # Finalizações
+        "totalShots", "onTargetScoringAttempt", "shotOffTarget",
+        "blockedScoringAttempt", "hitWoodwork", "expectedGoalsOnTarget", "bigChanceMissed",
+        # Passes
+        "totalPass", "accuratePass", "keyPass",
+        "totalOppositionHalfPasses", "accurateOppositionHalfPasses",
+        "totalOwnHalfPasses", "accurateOwnHalfPasses",
+        "totalLongBalls", "accurateLongBalls", "totalCross", "accurateCross",
+        # Condução de bola
+        "ballCarriesCount", "progressiveBallCarriesCount",
+        "totalBallCarriesDistance", "totalProgressiveBallCarriesDistance", "bestBallCarryProgression",
+        # Dribles, toques e posse
+        "totalContest", "wonContest", "touches", "possessionLostCtrl",
+        "unsuccessfulTouch", "dispossessed",
+        # Duelos e disciplina
+        "duelWon", "duelLost", "aerialWon", "aerialLost", "fouls", "wasFouled",
+        # Defesa
+        "totalTackle", "wonTackle", "interceptionWon", "ballRecovery",
+        "totalClearance", "outfielderBlock", "lastManTackle",
+        "challengeLost", "clearanceOffLine", "errorLeadToAShot", "errorLeadToAGoal",
+        # Físico
+        "kilometersCovered", "metersCoveredRunningKm", "metersCoveredHighSpeedRunningKm",
+        "metersCoveredSprintingKm", "numberOfSprints", "topSpeed",
+        # Goleiro
+        "saves", "savedShotsFromInsideTheBox", "goalsPrevented", "goodHighClaim",
+        "punches", "totalKeeperSweeper", "accurateKeeperSweeper", "penaltyFaced",
+        "penaltyShootoutSave",
+        # Pênaltis / demais eventos
+        "penaltyWon", "penaltyConceded", "penaltyShootoutGoal", "penaltyShootoutMiss", "ownGoals",
+    ]
+
+    taxa_nomes = {
+        "goals": "Gols",
+        "goalAssist": "Assistências",
+        "totalShots": "Finalizações",
+        "onTargetScoringAttempt": "Finalizações no gol",
+        "totalPass": "Passes",
+        "accuratePass": "Passes certos",
+        "ballCarriesCount": "Conduções de bola",
+        "progressiveBallCarriesCount": "Conduções progressivas",
+        "totalContest": "Dribles tentados",
+        "wonContest": "Dribles certos",
+        "totalTackle": "Desarmes",
+        "interceptionWon": "Interceptações",
+        "ballRecovery": "Recuperações de bola",
+    }
+
+    colunas: list[dict[str, Any]] = []
+    presentes_ordenadas = [key for key in ordem_base if key in chaves_presentes]
+    presentes_ordenadas += sorted(
+        [key for key in chaves_presentes if key not in set(ordem_base)],
+        key=lambda key: INDIVIDUAIS_META[key]["nome"],
+    )
+
+    for key in presentes_ordenadas:
+        meta = INDIVIDUAIS_META[key]
+        colunas.append(
+            {
+                "chave": key,
+                "nome": meta["nome"],
+                "categoria": meta["categoria"],
+                "unidade": meta.get("unidade"),
+            }
+        )
+        if key in taxa_nomes:
+            colunas.append(
+                {
+                    "chave": f"{key}__por_jogo",
+                    "nome": f"{taxa_nomes[key]} por jogo",
+                    "categoria": meta["categoria"],
+                    "unidade": None,
+                }
+            )
+            colunas.append(
+                {
+                    "chave": f"{key}__por_minuto",
+                    "nome": f"{taxa_nomes[key]} por minuto",
+                    "categoria": meta["categoria"],
+                    "unidade": None,
+                }
+            )
+
+    return resultado, colunas
+
+
+def dados_individuais(
+    temporada: int,
+    campeonato: str | None = None,
+    jogador_id: int | None = None,
+    posicao: str | None = None,
+) -> dict[str, Any]:
+    rows = _linhas_individuais(temporada, campeonato, jogador_id, posicao)
+    jogadores, colunas = _agregar_individual(rows)
+    return {
+        "temporada": temporada,
+        "campeonato": campeonato,
+        "jogador_id": jogador_id,
+        "posicao": posicao,
+        "colunas": colunas,
+        "jogadores": jogadores,
+    }
+
+
+# -----------------------------------------------------------------------------
+# Comparações
+# -----------------------------------------------------------------------------
+
+def dados_comparacao_temporadas() -> dict[str, Any]:
+    temporadas = listar_temporadas_disponiveis()
+    resultados: dict[int, dict[str, Any]] = {}
+    todas_chaves: set[str] = set()
+
+    for temporada in temporadas:
+        rows = _linhas_estatisticas_coletivas(temporada)
+        metricas = _agregar_metricas_coletivas(rows, lambda row: row["lado_galo"])
+        por_chave = {metrica["chave"]: metrica for metrica in metricas}
+        todas_chaves.update(por_chave)
+        resultados[temporada] = {
+            "resumo": _resumo_galo(rows),
+            "metricas": por_chave,
+        }
+
+    metricas_saida = []
+    for key in todas_chaves:
+        meta = COLETIVAS_META.get(key)
+        if not meta:
+            continue
+        valores = {
+            str(temporada): resultados.get(temporada, {}).get("metricas", {}).get(key, {}).get("media")
+            for temporada in temporadas
+        }
+        metricas_saida.append(
+            {
+                "chave": key,
+                "nome": meta["nome"],
+                "categoria": meta["categoria"],
+                "unidade": meta.get("unidade"),
+                "valores": valores,
+            }
+        )
+
+    metricas_saida.sort(key=lambda x: (x["categoria"], x["nome"]))
+    return {
+        "temporadas": temporadas,
+        "resumos": {str(k): v["resumo"] for k, v in resultados.items()},
+        "metricas": metricas_saida,
+    }
+
+
+def dados_comparacao_adversario(
+    temporada: int,
+    campeonato: str | None = None,
+    adversario_id: int | None = None,
+) -> dict[str, Any]:
+    rows = _linhas_estatisticas_coletivas(temporada, campeonato, adversario_id)
+    galo = _agregar_metricas_coletivas(rows, lambda row: row["lado_galo"])
+    rival = _agregar_metricas_coletivas(
+        rows,
+        lambda row: "away" if row["lado_galo"] == "home" else "home",
+    )
+    galo_map = {m["chave"]: m for m in galo}
+    rival_map = {m["chave"]: m for m in rival}
+
+    nome_adversario = "Todos os adversários"
+    if adversario_id is not None:
+        nomes = {str(row.get("adversario")) for row in rows if row.get("adversario")}
+        if nomes:
+            nome_adversario = sorted(nomes)[0]
+
+    metricas = []
+    for key in sorted(set(galo_map) | set(rival_map)):
+        meta = COLETIVAS_META.get(key)
+        if not meta:
+            continue
+        g = galo_map.get(key, {})
+        a = rival_map.get(key, {})
+        gv = g.get("media")
+        av = a.get("media")
+        diferenca = None
+        if gv is not None and av is not None:
+            diferenca = _round_value(float(gv) - float(av))
+        metricas.append(
+            {
+                "chave": key,
+                "nome": meta["nome"],
+                "categoria": meta["categoria"],
+                "unidade": meta.get("unidade"),
+                "galo": gv,
+                "adversario": av,
+                "diferenca": diferenca,
+            }
+        )
+
+    metricas.sort(key=lambda x: (x["categoria"], x["nome"]))
+    return {
+        "temporada": temporada,
+        "campeonato": campeonato,
+        "adversario_id": adversario_id,
+        "adversario_nome": nome_adversario,
+        "jogos": len(rows),
+        "metricas": metricas,
+    }
+
+
+# =============================================================================
+# V4 — correções de resultado, participações e comparações otimizadas
+# =============================================================================
+
+# Correções pontuais de atribuição oficial de gols quando o SofaScore classifica
+# um lance como gol contra. Chave: (event_id, jogador_id) -> gols adicionais.
+_GOLS_OFICIAIS_AJUSTES: dict[tuple[int, int], int] = {
+    # Pouso Alegre 1 x 3 Atlético, Mineiro 2026. O SofaScore marcou o 2º gol
+    # como gol contra de Victor Araújo; Atlético/No Ataque creditam a Tomás Cuello.
+    (15188790, 871273): 1,
+}
+
+_COMPARACAO_CACHE: dict[tuple[Any, ...], tuple[float, dict[str, Any]]] = {}
+_COMPARACAO_CACHE_TTL = 180.0
+
+
+def _cache_comparacao_get(chave: tuple[Any, ...]) -> dict[str, Any] | None:
+    import time
+
+    item = _COMPARACAO_CACHE.get(chave)
+    if not item:
+        return None
+    criado_em, valor = item
+    if time.monotonic() - criado_em > _COMPARACAO_CACHE_TTL:
+        _COMPARACAO_CACHE.pop(chave, None)
+        return None
+    return valor
+
+
+def _cache_comparacao_set(chave: tuple[Any, ...], valor: dict[str, Any]) -> dict[str, Any]:
+    import time
+
+    _COMPARACAO_CACHE[chave] = (time.monotonic(), valor)
+    return valor
+
+
+def _json_dict(valor: Any) -> dict[str, Any]:
+    if isinstance(valor, dict):
+        return valor
+    if isinstance(valor, str):
+        try:
+            convertido = json.loads(valor)
+            return convertido if isinstance(convertido, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _placar_regulamentar(row: dict[str, Any]) -> tuple[int | None, int | None]:
+    """Retorna o placar válido para histórico, sem somar disputa de pênaltis."""
+    gm = row.get("gols_mandante")
+    gv = row.get("gols_visitante")
+    gm_int = int(gm) if gm is not None else None
+    gv_int = int(gv) if gv is not None else None
+
+    metadados = _json_dict(row.get("metadados"))
+    status_desc = str((metadados.get("sofascore") or {}).get("status_description") or "").upper()
+    if status_desc != "AP":
+        return gm_int, gv_int
+
+    # O sincronizador de incidentes salva somente gols da partida, não as
+    # cobranças da disputa de pênaltis. Assim, para jogos marcados como AP,
+    # contar esse array nos dá o placar de campo correto (90/120 minutos).
+    gols = metadados.get("gols")
+    if not isinstance(gols, list):
+        return gm_int, gv_int
+
+    mandante = str(row.get("mandante") or "")
+    visitante = str(row.get("visitante") or "")
+    home = away = 0
+    reconhecidos = 0
+    for gol in gols:
+        if not isinstance(gol, dict):
+            continue
+        time_nome = str(gol.get("time") or "")
+        if time_nome == mandante:
+            home += 1
+            reconhecidos += 1
+        elif time_nome == visitante:
+            away += 1
+            reconhecidos += 1
+
+    # 0 x 0 após o tempo de jogo é representado corretamente por lista vazia.
+    if reconhecidos == 0 and gols:
+        return gm_int, gv_int
+    return home, away
+
+
+def _linhas_estatisticas_coletivas(
+    temporada: int | None = None,
+    campeonato: str | None = None,
+    adversario_id: int | None = None,
+) -> list[dict[str, Any]]:
+    where, params = _filtros_where(temporada, campeonato)
+    filtro_adversario = ""
+    if adversario_id is not None:
+        filtro_adversario = """
+          and case when e.lado_galo = 'home'
+                then (j.metadados->'sofascore'->'team_ids'->>'away')::bigint
+                else (j.metadados->'sofascore'->'team_ids'->>'home')::bigint
+              end = %s
+        """
+        params.append(int(adversario_id))
+
+    sql = f"""
+        select
+            e.estatisticas,
+            e.lado_galo,
+            j.id as jogo_id,
+            j.gols_mandante,
+            j.gols_visitante,
+            j.mandante,
+            j.visitante,
+            j.metadados,
+            j.inicio_em,
+            c.nome as campeonato,
+            case when e.lado_galo = 'home'
+                then (j.metadados->'sofascore'->'team_ids'->>'away')::bigint
+                else (j.metadados->'sofascore'->'team_ids'->>'home')::bigint
+            end as adversario_id,
+            case when e.lado_galo = 'home' then j.visitante else j.mandante end as adversario
+        from public.estatisticas_jogos_sofascore e
+        join public.jogos j on j.id = e.jogo_id
+        left join public.competicoes c on c.id = j.competicao_id
+        where {where}
+          {filtro_adversario}
+        order by j.inicio_em asc
+    """
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            colunas = [desc.name for desc in cur.description]
+            return [dict(zip(colunas, row, strict=True)) for row in cur.fetchall()]
+
+
+def _resumo_galo(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    vitorias = empates = derrotas = 0
+    gols_pro = gols_contra = 0
+    jogos_validos = 0
+
+    for row in rows:
+        gm, gv = _placar_regulamentar(row)
+        if gm is None or gv is None:
+            continue
+        jogos_validos += 1
+        lado = row["lado_galo"]
+        pro = int(gm if lado == "home" else gv)
+        contra = int(gv if lado == "home" else gm)
+        gols_pro += pro
+        gols_contra += contra
+        if pro > contra:
+            vitorias += 1
+        elif pro == contra:
+            empates += 1
+        else:
+            derrotas += 1
+
+    jogos = jogos_validos
+    pontos = vitorias * 3 + empates
+    aproveitamento = round((pontos / (jogos * 3) * 100), 1) if jogos else 0.0
+    minutos = jogos * 90
+    return {
+        "jogos": jogos,
+        "vitorias": vitorias,
+        "empates": empates,
+        "derrotas": derrotas,
+        "gols_pro": gols_pro,
+        "gols_contra": gols_contra,
+        "gols_por_jogo": _round_value(gols_pro / jogos if jogos else 0),
+        "gols_por_minuto": _round_value(gols_pro / minutos if minutos else 0, 4),
+        "gols_sofridos_por_jogo": _round_value(gols_contra / jogos if jogos else 0),
+        "gols_sofridos_por_minuto": _round_value(gols_contra / minutos if minutos else 0, 4),
+        "aproveitamento": aproveitamento,
+    }
+
+
+def _linhas_individuais(
+    temporada: int,
+    campeonato: str | None = None,
+    jogador_id: int | None = None,
+    posicao: str | None = None,
+) -> list[dict[str, Any]]:
+    where, params = _filtros_where(temporada, campeonato)
+    extras = []
+    if jogador_id is not None:
+        extras.append("p.jogador_id = %s")
+        params.append(int(jogador_id))
+    if posicao:
+        extras.append("p.posicao = %s")
+        params.append(posicao)
+
+    extra_sql = ""
+    if extras:
+        extra_sql = " and " + " and ".join(extras)
+
+    sql = f"""
+        select
+            p.jogador_id,
+            p.event_id,
+            p.nome,
+            coalesce(nullif(p.nome_guerra, ''), p.nome) as nome_guerra,
+            p.posicao,
+            p.camisa,
+            p.titular,
+            p.estatisticas,
+            j.metadados,
+            j.inicio_em
+        from public.estatisticas_jogadores_sofascore p
+        join public.jogos j on j.id = p.jogo_id
+        left join public.competicoes c on c.id = j.competicao_id
+        where {where}
+          {extra_sql}
+        order by j.inicio_em asc
+    """
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            colunas = [desc.name for desc in cur.description]
+            return [dict(zip(colunas, row, strict=True)) for row in cur.fetchall()]
+
+
+def _agregar_individual(
+    rows: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    labels = _anos_jogador_label()
+    jogadores: dict[int, dict[str, Any]] = {}
+    chaves_presentes: set[str] = set()
+
+    for row in rows:
+        stats = _json_dict(row.get("estatisticas"))
+        if not stats:
+            continue
+
+        # O endpoint de lineups também devolve reservas não utilizados. Eles
+        # não são partidas disputadas. Só contabilizamos quem efetivamente teve
+        # minutos em campo.
+        minutos = _to_number(stats.get("minutesPlayed"))
+        if minutos is None or minutos <= 0:
+            continue
+
+        jogador_id = int(row["jogador_id"])
+        label_info = labels.get(jogador_id, {})
+        item = jogadores.setdefault(
+            jogador_id,
+            {
+                "jogador_id": jogador_id,
+                "nome": row.get("nome"),
+                "nome_guerra": row.get("nome_guerra") or row.get("nome"),
+                "rotulo": label_info.get("rotulo") or row.get("nome_guerra") or row.get("nome"),
+                "posicao": row.get("posicao"),
+                "posicao_nome": POSICOES_PT.get(str(row.get("posicao") or ""), row.get("posicao") or "—"),
+                "camisa": row.get("camisa"),
+                "jogos": 0,
+                "titular": 0,
+                "minutos": 0.0,
+                "rating_soma": 0.0,
+                "rating_count": 0,
+                "metricas": {},
+                "metricas_count": defaultdict(int),
+                "gols_incidentes": 0,
+                "assistencias_incidentes": 0,
+            },
+        )
+
+        item["jogos"] += 1
+        if row.get("titular"):
+            item["titular"] += 1
+        item["minutos"] += minutos
+
+        rating = _to_number(stats.get("rating"))
+        if rating is not None:
+            item["rating_soma"] += rating
+            item["rating_count"] += 1
+
+        for key, meta in INDIVIDUAIS_META.items():
+            value = _to_number(stats.get(key))
+            if value is None:
+                continue
+            chaves_presentes.add(key)
+            current = item["metricas"].get(key)
+            if meta["agregacao"] == "max":
+                item["metricas"][key] = value if current is None else max(current, value)
+            else:
+                item["metricas"][key] = (current or 0.0) + value
+            item["metricas_count"][key] += 1
+
+        # Incidentes são uma segunda fonte para gols e assistências. Isso evita
+        # perder eventos quando o bloco statistics do lineup vem incompleto.
+        metadados = _json_dict(row.get("metadados"))
+        gols_partida = metadados.get("gols")
+        gols_do_jogador = 0
+        assistencias_do_jogador = 0
+        if isinstance(gols_partida, list):
+            for gol in gols_partida:
+                if not isinstance(gol, dict):
+                    continue
+                try:
+                    autor_id = int(gol.get("jogador_id")) if gol.get("jogador_id") is not None else None
+                except (TypeError, ValueError):
+                    autor_id = None
+                try:
+                    assist_id = int(gol.get("assistencia_id")) if gol.get("assistencia_id") is not None else None
+                except (TypeError, ValueError):
+                    assist_id = None
+                if autor_id == jogador_id:
+                    gols_do_jogador += 1
+                if assist_id == jogador_id:
+                    assistencias_do_jogador += 1
+
+        event_id = int(row.get("event_id") or 0)
+        if gols_do_jogador == 0:
+            gols_do_jogador += _GOLS_OFICIAIS_AJUSTES.get((event_id, jogador_id), 0)
+
+        item["gols_incidentes"] += gols_do_jogador
+        item["assistencias_incidentes"] += assistencias_do_jogador
+
+    resultado: list[dict[str, Any]] = []
+    for item in jogadores.values():
+        metricas: dict[str, float | None] = {}
+        for key, value in item["metricas"].items():
+            meta = INDIVIDUAIS_META[key]
+            if meta["agregacao"] == "media":
+                count = item["metricas_count"].get(key, 0)
+                final = value / count if count else None
+            else:
+                final = value
+            metricas[key] = _round_value(final)
+
+        # Para gols/assistências usamos o maior valor entre lineup e incidentes.
+        # O ajuste oficial acima corrige o gol de Cuello x Pouso Alegre (2026).
+        gols_lineup = float(metricas.get("goals") or 0)
+        assist_lineup = float(metricas.get("goalAssist") or 0)
+        metricas["goals"] = _round_value(max(gols_lineup, float(item["gols_incidentes"])))
+        metricas["goalAssist"] = _round_value(max(assist_lineup, float(item["assistencias_incidentes"])))
+        chaves_presentes.update({"goals", "goalAssist"})
+
+        nota_media = (
+            round(item["rating_soma"] / item["rating_count"], 2)
+            if item["rating_count"]
+            else None
+        )
+        jogos_item = int(item["jogos"])
+        minutos_item = float(item["minutos"])
+
+        derivados_base = (
+            "goals",
+            "goalAssist",
+            "totalShots",
+            "onTargetScoringAttempt",
+            "totalPass",
+            "accuratePass",
+            "ballCarriesCount",
+            "progressiveBallCarriesCount",
+            "totalContest",
+            "wonContest",
+            "totalTackle",
+            "interceptionWon",
+            "ballRecovery",
+        )
+        for key in derivados_base:
+            valor = metricas.get(key)
+            if valor is None:
+                continue
+            metricas[f"{key}__por_jogo"] = _round_value(float(valor) / jogos_item if jogos_item else 0)
+            metricas[f"{key}__por_minuto"] = _round_value(float(valor) / minutos_item if minutos_item else 0, 4)
+
+        resultado.append(
+            {
+                "jogador_id": item["jogador_id"],
+                "nome": item["nome"],
+                "nome_guerra": item["nome_guerra"],
+                "rotulo": item["rotulo"],
+                "posicao": item["posicao"],
+                "posicao_nome": item["posicao_nome"],
+                "camisa": item["camisa"],
+                "foto_url": f"https://img.sofascore.com/api/v1/player/{item['jogador_id']}/image",
+                "jogos": jogos_item,
+                "titular": int(item["titular"]),
+                "minutos": int(round(item["minutos"])),
+                "nota_media": nota_media,
+                "soma_rating": _round_value(item["rating_soma"]),
+                "metricas": metricas,
+            }
+        )
+
+    resultado.sort(
+        key=lambda x: (
+            POSICOES_ORDEM.get(str(x.get("posicao") or ""), 99),
+            -x["minutos"],
+            str(x["rotulo"]).casefold(),
+        )
+    )
+
+    ordem_base = [
+        "goals", "goalAssist", "expectedGoals", "expectedAssists",
+        "totalShots", "onTargetScoringAttempt", "shotOffTarget",
+        "blockedScoringAttempt", "hitWoodwork", "expectedGoalsOnTarget", "bigChanceMissed",
+        "totalPass", "accuratePass", "keyPass",
+        "totalOppositionHalfPasses", "accurateOppositionHalfPasses",
+        "totalOwnHalfPasses", "accurateOwnHalfPasses",
+        "totalLongBalls", "accurateLongBalls", "totalCross", "accurateCross",
+        "ballCarriesCount", "progressiveBallCarriesCount",
+        "totalBallCarriesDistance", "totalProgressiveBallCarriesDistance", "bestBallCarryProgression",
+        "totalContest", "wonContest", "touches", "possessionLostCtrl",
+        "unsuccessfulTouch", "dispossessed",
+        "duelWon", "duelLost", "aerialWon", "aerialLost", "fouls", "wasFouled",
+        "totalTackle", "wonTackle", "interceptionWon", "ballRecovery",
+        "totalClearance", "outfielderBlock", "lastManTackle",
+        "challengeLost", "clearanceOffLine", "errorLeadToAShot", "errorLeadToAGoal",
+        "kilometersCovered", "metersCoveredRunningKm", "metersCoveredHighSpeedRunningKm",
+        "metersCoveredSprintingKm", "numberOfSprints", "topSpeed",
+        "saves", "savedShotsFromInsideTheBox", "goalsPrevented", "goodHighClaim",
+        "punches", "totalKeeperSweeper", "accurateKeeperSweeper", "penaltyFaced",
+        "penaltyShootoutSave",
+        "penaltyWon", "penaltyConceded", "penaltyShootoutGoal", "penaltyShootoutMiss", "ownGoals",
+    ]
+
+    taxa_nomes = {
+        "goals": "Gols",
+        "goalAssist": "Assistências",
+        "totalShots": "Finalizações",
+        "onTargetScoringAttempt": "Finalizações no gol",
+        "totalPass": "Passes",
+        "accuratePass": "Passes certos",
+        "ballCarriesCount": "Conduções de bola",
+        "progressiveBallCarriesCount": "Conduções progressivas",
+        "totalContest": "Dribles tentados",
+        "wonContest": "Dribles certos",
+        "totalTackle": "Desarmes",
+        "interceptionWon": "Interceptações",
+        "ballRecovery": "Recuperações de bola",
+    }
+
+    colunas: list[dict[str, Any]] = []
+    presentes_ordenadas = [key for key in ordem_base if key in chaves_presentes]
+    presentes_ordenadas += sorted(
+        [key for key in chaves_presentes if key not in set(ordem_base)],
+        key=lambda key: INDIVIDUAIS_META[key]["nome"],
+    )
+
+    for key in presentes_ordenadas:
+        meta = INDIVIDUAIS_META[key]
+        colunas.append(
+            {
+                "chave": key,
+                "nome": meta["nome"],
+                "categoria": meta["categoria"],
+                "unidade": meta.get("unidade"),
+            }
+        )
+        if key in taxa_nomes:
+            colunas.append(
+                {
+                    "chave": f"{key}__por_jogo",
+                    "nome": f"{taxa_nomes[key]} por jogo",
+                    "categoria": meta["categoria"],
+                    "unidade": None,
+                }
+            )
+            colunas.append(
+                {
+                    "chave": f"{key}__por_minuto",
+                    "nome": f"{taxa_nomes[key]} por minuto",
+                    "categoria": meta["categoria"],
+                    "unidade": None,
+                }
+            )
+
+    return resultado, colunas
+
+
+def _linhas_comparacao_todas_temporadas(campeonato: str | None = None) -> list[dict[str, Any]]:
+    where, params = _filtros_where(None, campeonato)
+    sql = f"""
+        select
+            e.estatisticas,
+            e.lado_galo,
+            j.id as jogo_id,
+            j.gols_mandante,
+            j.gols_visitante,
+            j.mandante,
+            j.visitante,
+            j.metadados,
+            j.inicio_em,
+            c.nome as campeonato,
+            extract(year from (j.inicio_em at time zone 'America/Sao_Paulo'))::int as temporada
+        from public.estatisticas_jogos_sofascore e
+        join public.jogos j on j.id=e.jogo_id
+        left join public.competicoes c on c.id=j.competicao_id
+        where {where}
+          and extract(year from (j.inicio_em at time zone 'America/Sao_Paulo'))::int >= 2020
+        order by j.inicio_em asc
+    """
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            colunas = [desc.name for desc in cur.description]
+            return [dict(zip(colunas, row, strict=True)) for row in cur.fetchall()]
+
+
+def _valores_metrica_comparacao(metrica: dict[str, Any] | None) -> dict[str, float | None]:
+    if not metrica:
+        return {"total": None, "por_jogo": None, "por_minuto": None}
+    return {
+        "total": metrica.get("total"),
+        "por_jogo": metrica.get("media"),
+        "por_minuto": metrica.get("por_minuto"),
+    }
+
+
+def dados_comparacao_temporadas(campeonato: str | None = None) -> dict[str, Any]:
+    chave_cache = ("temporadas", campeonato or "")
+    cache = _cache_comparacao_get(chave_cache)
+    if cache is not None:
+        return cache
+
+    rows = _linhas_comparacao_todas_temporadas(campeonato)
+    grupos: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        ano = int(row.get("temporada") or 0)
+        if ano >= 2020:
+            grupos[ano].append(row)
+
+    temporadas = sorted(grupos.keys(), reverse=True)
+    resultados: dict[int, dict[str, Any]] = {}
+    todas_chaves: set[str] = set()
+    for temporada in temporadas:
+        linhas = grupos[temporada]
+        metricas = _agregar_metricas_coletivas(linhas, lambda row: row["lado_galo"])
+        por_chave = {metrica["chave"]: metrica for metrica in metricas}
+        todas_chaves.update(por_chave)
+        resultados[temporada] = {
+            "resumo": _resumo_galo(linhas),
+            "metricas": por_chave,
+        }
+
+    metricas_saida = []
+    for key in todas_chaves:
+        meta = COLETIVAS_META.get(key)
+        if not meta:
+            continue
+        valores = {
+            str(temporada): _valores_metrica_comparacao(
+                resultados.get(temporada, {}).get("metricas", {}).get(key)
+            )
+            for temporada in temporadas
+        }
+        metricas_saida.append(
+            {
+                "chave": key,
+                "nome": meta["nome"],
+                "categoria": meta["categoria"],
+                "unidade": meta.get("unidade"),
+                "valores": valores,
+            }
+        )
+
+    metricas_saida.sort(key=lambda x: (x["categoria"], x["nome"]))
+    return _cache_comparacao_set(
+        chave_cache,
+        {
+            "campeonato": campeonato,
+            "temporadas": temporadas,
+            "resumos": {str(k): v["resumo"] for k, v in resultados.items()},
+            "metricas": metricas_saida,
+        },
+    )
+
+
+def dados_comparacao_adversario(
+    temporada: int,
+    campeonato: str | None = None,
+    adversario_id: int | None = None,
+) -> dict[str, Any]:
+    chave_cache = ("adversario", temporada, campeonato or "", adversario_id or 0)
+    cache = _cache_comparacao_get(chave_cache)
+    if cache is not None:
+        return cache
+
+    rows = _linhas_estatisticas_coletivas(temporada, campeonato, adversario_id)
+    galo = _agregar_metricas_coletivas(rows, lambda row: row["lado_galo"])
+    rival = _agregar_metricas_coletivas(
+        rows,
+        lambda row: "away" if row["lado_galo"] == "home" else "home",
+    )
+    galo_map = {m["chave"]: m for m in galo}
+    rival_map = {m["chave"]: m for m in rival}
+
+    nome_adversario = "Todos os adversários"
+    if adversario_id is not None:
+        nomes = {str(row.get("adversario")) for row in rows if row.get("adversario")}
+        if nomes:
+            nome_adversario = sorted(nomes)[0]
+
+    metricas = []
+    for key in sorted(set(galo_map) | set(rival_map)):
+        meta = COLETIVAS_META.get(key)
+        if not meta:
+            continue
+        g_vals = _valores_metrica_comparacao(galo_map.get(key))
+        a_vals = _valores_metrica_comparacao(rival_map.get(key))
+        diferenca = {
+            modo: _round_value(float(g_vals[modo]) - float(a_vals[modo]))
+            if g_vals[modo] is not None and a_vals[modo] is not None
+            else None
+            for modo in ("total", "por_jogo", "por_minuto")
+        }
+        metricas.append(
+            {
+                "chave": key,
+                "nome": meta["nome"],
+                "categoria": meta["categoria"],
+                "unidade": meta.get("unidade"),
+                "galo": g_vals,
+                "adversario": a_vals,
+                "diferenca": diferenca,
+            }
+        )
+
+    metricas.sort(key=lambda x: (x["categoria"], x["nome"]))
+    return _cache_comparacao_set(
+        chave_cache,
+        {
+            "temporada": temporada,
+            "campeonato": campeonato,
+            "adversario_id": adversario_id,
+            "adversario_nome": nome_adversario,
+            "jogos": len(rows),
+            "metricas": metricas,
+        },
+    )
+
+
+def listar_filtros_dados(
+    temporada: int | None = None,
+    campeonato: str | None = None,
+) -> dict[str, Any]:
+    chave_cache = ("filtros", temporada or 0, campeonato or "")
+    cache = _cache_comparacao_get(chave_cache)
+    if cache is not None:
+        return cache
+
+    temporadas = listar_temporadas_disponiveis()
+    if temporada is None:
+        temporada = temporadas[0] if temporadas else datetime.now().year
+
+    where, params = _filtros_where(temporada, None)
+    sql_campeonatos = f"""
+        select distinct c.nome
+        from public.jogos j
+        join public.estatisticas_jogos_sofascore e on e.jogo_id = j.id
+        left join public.competicoes c on c.id = j.competicao_id
+        where {where}
+          and c.nome is not null
+        order by c.nome
+    """
+
+    placeholders = ", ".join(["%s"] * len(CAMPEONATOS_OFICIAIS))
+    sql_campeonatos_comparacao = f"""
+        select distinct c.nome
+        from public.jogos j
+        join public.estatisticas_jogos_sofascore e on e.jogo_id = j.id
+        join public.competicoes c on c.id = j.competicao_id
+        where j.status='finalizado'
+          and j.id_externo like 'sofascore:%%'
+          and extract(year from (j.inicio_em at time zone 'America/Sao_Paulo'))::int >= 2020
+          and c.nome in ({placeholders})
+        order by c.nome
+    """
+
+    where_ind, params_ind = _filtros_where(temporada, campeonato)
+    sql_jogadores = f"""
+        select distinct p.jogador_id, coalesce(nullif(p.nome_guerra, ''), p.nome), p.posicao
+        from public.estatisticas_jogadores_sofascore p
+        join public.jogos j on j.id = p.jogo_id
+        left join public.competicoes c on c.id = j.competicao_id
+        where {where_ind}
+          and coalesce((p.estatisticas->>'minutesPlayed')::numeric, 0) > 0
+        order by 2
+    """
+
+    sql_adversarios = f"""
+        select distinct
+            case when e.lado_galo = 'home'
+                then (j.metadados->'sofascore'->'team_ids'->>'away')::bigint
+                else (j.metadados->'sofascore'->'team_ids'->>'home')::bigint
+            end as adversario_id,
+            case when e.lado_galo = 'home' then j.visitante else j.mandante end as adversario
+        from public.estatisticas_jogos_sofascore e
+        join public.jogos j on j.id = e.jogo_id
+        left join public.competicoes c on c.id = j.competicao_id
+        where {where_ind}
+        order by adversario
+    """
+
+    labels = _anos_jogador_label()
+
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql_campeonatos, params)
+            encontrados = {row[0] for row in cur.fetchall() if row[0]}
+            campeonatos = [nome for nome in CAMPEONATOS_OFICIAIS if nome in encontrados]
+
+            cur.execute(sql_campeonatos_comparacao, list(CAMPEONATOS_OFICIAIS))
+            encontrados_comp = {row[0] for row in cur.fetchall() if row[0]}
+            campeonatos_comparacao = [nome for nome in CAMPEONATOS_OFICIAIS if nome in encontrados_comp]
+
+            cur.execute(sql_jogadores, params_ind)
+            jogadores_rows = cur.fetchall()
+
+            cur.execute(sql_adversarios, params_ind)
+            adversarios_rows = cur.fetchall()
+
+    jogadores = []
+    posicoes: dict[str, str] = {}
+    for jogador_id, nome, posicao in jogadores_rows:
+        jid = int(jogador_id)
+        info = labels.get(jid, {})
+        jogadores.append(
+            {
+                "id": jid,
+                "nome_guerra": info.get("nome_guerra") or str(nome),
+                "rotulo": info.get("rotulo") or str(nome),
+            }
+        )
+        if posicao:
+            posicoes[str(posicao)] = POSICOES_PT.get(str(posicao), str(posicao))
+
+    jogadores.sort(key=lambda x: x["rotulo"].casefold())
+    posicoes_lista = [
+        {"codigo": codigo, "nome": nome}
+        for codigo, nome in sorted(
+            posicoes.items(),
+            key=lambda item: POSICOES_ORDEM.get(item[0], 99),
+        )
+    ]
+
+    adversarios = [
+        {"id": int(adversario_id), "nome": adversario}
+        for adversario_id, adversario in adversarios_rows
+        if adversario_id is not None and adversario
+    ]
+
+    return _cache_comparacao_set(
+        chave_cache,
+        {
+            "temporadas": temporadas,
+            "campeonatos": campeonatos,
+            "campeonatos_comparacao": campeonatos_comparacao,
+            "jogadores": jogadores,
+            "posicoes": posicoes_lista,
+            "adversarios": adversarios,
+        },
+    )

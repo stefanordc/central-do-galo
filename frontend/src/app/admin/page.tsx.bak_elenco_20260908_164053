@@ -79,7 +79,6 @@ type JogadorAdmin = {
   idade: number;
   numero: number | null;
   posicao: PosicaoElenco;
-  nacionalidade: string;
   ativo: boolean;
   tem_foto: boolean;
   foto_url: string | null;
@@ -141,14 +140,12 @@ export default function AdminPage() {
   const [nomeCompletoJogador, setNomeCompletoJogador] = useState("");
   const [nomeGuerraJogador, setNomeGuerraJogador] = useState("");
   const [posicaoJogador, setPosicaoJogador] = useState<PosicaoElenco>("Goleiro");
-  const [nacionalidadeJogador, setNacionalidadeJogador] = useState("Brasil");
   const [nascimentoJogador, setNascimentoJogador] = useState("");
   const [numeroJogador, setNumeroJogador] = useState("");
   const [fotoJogadorPreview, setFotoJogadorPreview] = useState("");
   const [fotoJogadorDataUrl, setFotoJogadorDataUrl] = useState("");
   const [removerFotoJogador, setRemoverFotoJogador] = useState(false);
   const [salvandoJogador, setSalvandoJogador] = useState(false);
-  const [otimizandoFotos, setOtimizandoFotos] = useState(false);
 
   const authHeaders = useMemo(
     () => (token ? { Authorization: `Bearer ${token}` } : {}),
@@ -348,7 +345,6 @@ export default function AdminPage() {
     setNomeCompletoJogador("");
     setNomeGuerraJogador("");
     setPosicaoJogador("Goleiro");
-    setNacionalidadeJogador("Brasil");
     setNascimentoJogador("");
     setNumeroJogador("");
     setFotoJogadorPreview("");
@@ -361,7 +357,6 @@ export default function AdminPage() {
     setNomeCompletoJogador(jogador.nome_completo);
     setNomeGuerraJogador(jogador.nome_guerra);
     setPosicaoJogador(jogador.posicao);
-    setNacionalidadeJogador(jogador.nacionalidade || "Brasil");
     setNascimentoJogador(jogador.nascimento);
     setNumeroJogador(jogador.numero == null ? "" : String(jogador.numero));
     setFotoJogadorPreview(jogador.foto_url ?? "");
@@ -382,7 +377,7 @@ export default function AdminPage() {
     return await new Promise<string>((resolve) => {
       const imagem = new Image();
       imagem.onload = () => {
-        const maximo = 900;
+        const maximo = 1400;
         const escala = Math.min(1, maximo / Math.max(imagem.width, imagem.height));
         const largura = Math.max(1, Math.round(imagem.width * escala));
         const altura = Math.max(1, Math.round(imagem.height * escala));
@@ -395,105 +390,12 @@ export default function AdminPage() {
           return;
         }
         contexto.drawImage(imagem, 0, 0, largura, altura);
-        // WEBP reduz bastante o peso e acelera o carregamento dos cards do elenco.
-        resolve(canvas.toDataURL("image/webp", 0.82));
+        const mime = arquivo.type === "image/png" ? "image/png" : "image/jpeg";
+        resolve(canvas.toDataURL(mime, 0.9));
       };
       imagem.onerror = () => resolve(original);
       imagem.src = original;
     });
-  }
-
-  async function normalizarFotoExistente(url: string): Promise<string> {
-    const response = await fetch(url, { cache: "no-store" });
-    if (!response.ok) {
-      throw new Error(`Não foi possível baixar a foto (${response.status}).`);
-    }
-
-    const blob = await response.blob();
-    const objectUrl = URL.createObjectURL(blob);
-
-    try {
-      return await new Promise<string>((resolve, reject) => {
-        const imagem = new Image();
-        imagem.onload = () => {
-          const maximo = 900;
-          const escala = Math.min(1, maximo / Math.max(imagem.width, imagem.height));
-          const largura = Math.max(1, Math.round(imagem.width * escala));
-          const altura = Math.max(1, Math.round(imagem.height * escala));
-          const canvas = document.createElement("canvas");
-          canvas.width = largura;
-          canvas.height = altura;
-          const contexto = canvas.getContext("2d");
-          if (!contexto) {
-            reject(new Error("Não foi possível preparar a foto para otimização."));
-            return;
-          }
-          contexto.drawImage(imagem, 0, 0, largura, altura);
-          resolve(canvas.toDataURL("image/webp", 0.82));
-        };
-        imagem.onerror = () => reject(new Error("Não foi possível abrir a foto."));
-        imagem.src = objectUrl;
-      });
-    } finally {
-      URL.revokeObjectURL(objectUrl);
-    }
-  }
-
-  async function otimizarFotosElenco() {
-    const comFoto = jogadores.filter((jogador) => jogador.foto_url);
-    if (!comFoto.length) {
-      setMensagem("Não há fotos cadastradas para otimizar.");
-      return;
-    }
-
-    if (!window.confirm(`Otimizar ${comFoto.length} foto(s) do elenco? Esse processo pode levar alguns minutos.`)) {
-      return;
-    }
-
-    setOtimizandoFotos(true);
-    let sucesso = 0;
-    let falhas = 0;
-
-    try {
-      for (let indice = 0; indice < comFoto.length; indice += 1) {
-        const jogador = comFoto[indice];
-        setMensagem(`Otimizando foto ${indice + 1}/${comFoto.length}: ${jogador.nome_guerra}`);
-
-        try {
-          const fotoDataUrl = await normalizarFotoExistente(jogador.foto_url!);
-          const response = await fetch(`${API_URL}/api/admin/elenco/${jogador.id}`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json", ...authHeaders },
-            body: JSON.stringify({
-              nome_completo: jogador.nome_completo,
-              nome_guerra: jogador.nome_guerra,
-              posicao: jogador.posicao,
-              nacionalidade: jogador.nacionalidade || "Brasil",
-              nascimento: jogador.nascimento,
-              numero: jogador.posicao === "Técnico" ? null : jogador.numero,
-              foto_data_url: fotoDataUrl,
-              remover_foto: false,
-            }),
-          });
-
-          if (!response.ok) {
-            throw new Error(`API respondeu ${response.status}.`);
-          }
-          sucesso += 1;
-        } catch {
-          falhas += 1;
-        }
-      }
-
-      await carregarDados();
-      setMensagem(
-        falhas
-          ? `Otimização concluída: ${sucesso} foto(s) otimizadas e ${falhas} com falha.`
-          : `Otimização concluída: ${sucesso} foto(s) ficaram mais leves.`
-      );
-    } finally {
-      setOtimizandoFotos(false);
-    }
   }
 
   async function colarFotoJogador(event: ClipboardEvent<HTMLElement>) {
@@ -551,7 +453,6 @@ export default function AdminPage() {
             nome_completo: nomeCompletoJogador,
             nome_guerra: nomeGuerraJogador,
             posicao: posicaoJogador,
-            nacionalidade: nacionalidadeJogador.trim() || "Brasil",
             nascimento: nascimentoJogador,
             numero,
             foto_data_url: fotoJogadorDataUrl || null,
@@ -769,20 +670,6 @@ export default function AdminPage() {
             <span>{jogadores.length} jogador(es)</span>
           </div>
 
-          <div className="admin-squad-actions">
-            <button
-              className="admin-secondary-button"
-              type="button"
-              onClick={otimizarFotosElenco}
-              disabled={otimizandoFotos || jogadores.length === 0}
-            >
-              {otimizandoFotos ? "Otimizando fotos..." : "Otimizar fotos existentes"}
-            </button>
-            <span className="admin-photo-optimization-note">
-              Reduz o peso das fotos já cadastradas para acelerar o carregamento do Elenco.
-            </span>
-          </div>
-
           <form className="admin-form" onSubmit={salvarJogador}>
             <label>
               Nome completo
@@ -821,16 +708,6 @@ export default function AdminPage() {
                   </option>
                 ))}
               </select>
-            </label>
-
-            <label>
-              Nacionalidade
-              <input
-                value={nacionalidadeJogador}
-                onChange={(event) => setNacionalidadeJogador(event.target.value)}
-                placeholder="Brasil"
-                required
-              />
             </label>
 
             <div className="admin-squad-form-row">
@@ -1287,12 +1164,6 @@ export default function AdminPage() {
           margin-bottom: 8px;
           font-size: 13px;
           font-weight: 700;
-        }
-
-        .admin-photo-optimization-note {
-          color: #8a8f9c;
-          font-size: 12px;
-          align-self: center;
         }
 
         .admin-photo-paste {

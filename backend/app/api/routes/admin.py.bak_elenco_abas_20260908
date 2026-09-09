@@ -71,19 +71,8 @@ class CapaSiteUpdateIn(BaseModel):
 class JogadorElencoIn(BaseModel):
     nome_completo: str = Field(min_length=2, max_length=220)
     nome_guerra: str = Field(min_length=1, max_length=120)
-    posicao: Literal[
-        "Goleiro",
-        "Lateral-Direito",
-        "Lateral-Esquerdo",
-        "Zagueiro",
-        "Volante",
-        "Meia",
-        "Atacante",
-        "Técnico",
-    ]
-    nacionalidade: str = Field(default="Brasil", min_length=2, max_length=100)
     nascimento: date
-    numero: int | None = Field(default=None, ge=0, le=999)
+    numero: int = Field(ge=0, le=999)
     foto_data_url: str | None = None
     remover_foto: bool = False
 
@@ -199,8 +188,6 @@ def post_jogador_elenco_admin(
             nome_guerra=payload.nome_guerra,
             nascimento=payload.nascimento,
             numero=payload.numero,
-            posicao=payload.posicao,
-            nacionalidade=payload.nacionalidade,
             foto_data_url=payload.foto_data_url,
         )
     except ValueError as exc:
@@ -226,8 +213,6 @@ def put_jogador_elenco_admin(
             nome_guerra=payload.nome_guerra,
             nascimento=payload.nascimento,
             numero=payload.numero,
-            posicao=payload.posicao,
-            nacionalidade=payload.nacionalidade,
             foto_data_url=payload.foto_data_url,
             remover_foto=payload.remover_foto,
         )

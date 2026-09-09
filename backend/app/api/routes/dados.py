@@ -1,0 +1,86 @@
+from __future__ import annotations
+
+from datetime import datetime
+
+from fastapi import APIRouter, Query
+
+from app.services.dados_service import (
+    dados_coletivos,
+    dados_comparacao_adversario,
+    dados_comparacao_temporadas,
+    dados_individuais,
+    listar_filtros_dados,
+    listar_temporadas_disponiveis,
+    status_dados,
+)
+
+router = APIRouter(prefix="/dados", tags=["dados"])
+
+
+def _temporada_padrao() -> int:
+    temporadas = listar_temporadas_disponiveis()
+    return temporadas[0] if temporadas else datetime.now().year
+
+
+@router.get("/filtros")
+def get_filtros(
+    temporada: int | None = Query(default=None, ge=2000, le=2100),
+    campeonato: str | None = Query(default=None),
+) -> dict:
+    temporada = temporada or _temporada_padrao()
+    return listar_filtros_dados(temporada, campeonato)
+
+
+@router.get("/anos")
+def get_anos() -> dict:
+    # Compatibilidade com a primeira versão da página Dados.
+    return {"anos": listar_temporadas_disponiveis()}
+
+
+@router.get("/status")
+def get_status(
+    temporada: int | None = Query(default=None, ge=2000, le=2100),
+    ano: int | None = Query(default=None, ge=2000, le=2100),
+    campeonato: str | None = Query(default=None),
+) -> dict:
+    temporada = temporada or ano or _temporada_padrao()
+    return status_dados(temporada, campeonato)
+
+
+@router.get("/coletivos")
+def get_coletivos(
+    temporada: int | None = Query(default=None, ge=2000, le=2100),
+    ano: int | None = Query(default=None, ge=2000, le=2100),
+    campeonato: str | None = Query(default=None),
+) -> dict:
+    temporada = temporada or ano or _temporada_padrao()
+    return dados_coletivos(temporada, campeonato)
+
+
+@router.get("/individual")
+def get_individual(
+    temporada: int | None = Query(default=None, ge=2000, le=2100),
+    ano: int | None = Query(default=None, ge=2000, le=2100),
+    campeonato: str | None = Query(default=None),
+    jogador_id: int | None = Query(default=None, ge=1),
+    posicao: str | None = Query(default=None),
+) -> dict:
+    temporada = temporada or ano or _temporada_padrao()
+    return dados_individuais(temporada, campeonato, jogador_id, posicao)
+
+
+@router.get("/comparacao/temporadas")
+def get_comparacao_temporadas(
+    campeonato: str | None = Query(default=None),
+) -> dict:
+    return dados_comparacao_temporadas(campeonato)
+
+
+@router.get("/comparacao/adversario")
+def get_comparacao_adversario(
+    temporada: int | None = Query(default=None, ge=2000, le=2100),
+    campeonato: str | None = Query(default=None),
+    adversario_id: int | None = Query(default=None, ge=1),
+) -> dict:
+    temporada = temporada or _temporada_padrao()
+    return dados_comparacao_adversario(temporada, campeonato, adversario_id)

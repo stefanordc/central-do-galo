@@ -50,36 +50,13 @@ type CapaSiteConfig = {
   atualizado_em: string | null;
 };
 
-type PosicaoElenco =
-  | "Goleiro"
-  | "Lateral-Direito"
-  | "Lateral-Esquerdo"
-  | "Zagueiro"
-  | "Volante"
-  | "Meia"
-  | "Atacante"
-  | "Técnico";
-
-const POSICOES_ELENCO: PosicaoElenco[] = [
-  "Goleiro",
-  "Lateral-Direito",
-  "Lateral-Esquerdo",
-  "Zagueiro",
-  "Volante",
-  "Meia",
-  "Atacante",
-  "Técnico",
-];
-
 type JogadorAdmin = {
   id: string;
   nome_completo: string;
   nome_guerra: string;
   nascimento: string;
   idade: number;
-  numero: number | null;
-  posicao: PosicaoElenco;
-  nacionalidade: string;
+  numero: number;
   ativo: boolean;
   tem_foto: boolean;
   foto_url: string | null;
@@ -113,7 +90,6 @@ export default function AdminPage() {
   const [canaisYoutube, setCanaisYoutube] = useState<CanalYoutubeAdmin[]>([]);
   const [jogadores, setJogadores] = useState<JogadorAdmin[]>([]);
   const [mensagem, setMensagem] = useState<string | null>(null);
-  const [abaAdmin, setAbaAdmin] = useState<"geral" | "elenco">("geral");
 
   const [tituloPagina, setTituloPagina] = useState("");
   const [slugPagina, setSlugPagina] = useState("");
@@ -140,15 +116,12 @@ export default function AdminPage() {
   const [jogadorEditandoId, setJogadorEditandoId] = useState<string | null>(null);
   const [nomeCompletoJogador, setNomeCompletoJogador] = useState("");
   const [nomeGuerraJogador, setNomeGuerraJogador] = useState("");
-  const [posicaoJogador, setPosicaoJogador] = useState<PosicaoElenco>("Goleiro");
-  const [nacionalidadeJogador, setNacionalidadeJogador] = useState("Brasil");
   const [nascimentoJogador, setNascimentoJogador] = useState("");
   const [numeroJogador, setNumeroJogador] = useState("");
   const [fotoJogadorPreview, setFotoJogadorPreview] = useState("");
   const [fotoJogadorDataUrl, setFotoJogadorDataUrl] = useState("");
   const [removerFotoJogador, setRemoverFotoJogador] = useState(false);
   const [salvandoJogador, setSalvandoJogador] = useState(false);
-  const [otimizandoFotos, setOtimizandoFotos] = useState(false);
 
   const authHeaders = useMemo(
     () => (token ? { Authorization: `Bearer ${token}` } : {}),
@@ -170,18 +143,6 @@ export default function AdminPage() {
       return correspondeBusca && correspondeDropdown;
     });
   }, [buscaCanal, canalSelecionado, canaisYoutube]);
-
-  const jogadoresOrdenados = useMemo(() => {
-    const ordem = new Map(POSICOES_ELENCO.map((posicao, indice) => [posicao, indice]));
-
-    return [...jogadores].sort((a, b) => {
-      const posicaoA = ordem.get(a.posicao) ?? 999;
-      const posicaoB = ordem.get(b.posicao) ?? 999;
-      if (posicaoA !== posicaoB) return posicaoA - posicaoB;
-      if (a.numero !== b.numero) return a.numero - b.numero;
-      return a.nome_guerra.localeCompare(b.nome_guerra, "pt-BR");
-    });
-  }, [jogadores]);
 
   useEffect(() => {
     const salvo = window.sessionStorage.getItem("central_galo_admin_token") ?? "";
@@ -347,8 +308,6 @@ export default function AdminPage() {
     setJogadorEditandoId(null);
     setNomeCompletoJogador("");
     setNomeGuerraJogador("");
-    setPosicaoJogador("Goleiro");
-    setNacionalidadeJogador("Brasil");
     setNascimentoJogador("");
     setNumeroJogador("");
     setFotoJogadorPreview("");
@@ -360,14 +319,11 @@ export default function AdminPage() {
     setJogadorEditandoId(jogador.id);
     setNomeCompletoJogador(jogador.nome_completo);
     setNomeGuerraJogador(jogador.nome_guerra);
-    setPosicaoJogador(jogador.posicao);
-    setNacionalidadeJogador(jogador.nacionalidade || "Brasil");
     setNascimentoJogador(jogador.nascimento);
-    setNumeroJogador(jogador.numero == null ? "" : String(jogador.numero));
+    setNumeroJogador(String(jogador.numero));
     setFotoJogadorPreview(jogador.foto_url ?? "");
     setFotoJogadorDataUrl("");
     setRemoverFotoJogador(false);
-    setAbaAdmin("elenco");
     setMensagem(`Editando ${jogador.nome_guerra}.`);
   }
 
@@ -382,7 +338,7 @@ export default function AdminPage() {
     return await new Promise<string>((resolve) => {
       const imagem = new Image();
       imagem.onload = () => {
-        const maximo = 900;
+        const maximo = 1400;
         const escala = Math.min(1, maximo / Math.max(imagem.width, imagem.height));
         const largura = Math.max(1, Math.round(imagem.width * escala));
         const altura = Math.max(1, Math.round(imagem.height * escala));
@@ -395,105 +351,12 @@ export default function AdminPage() {
           return;
         }
         contexto.drawImage(imagem, 0, 0, largura, altura);
-        // WEBP reduz bastante o peso e acelera o carregamento dos cards do elenco.
-        resolve(canvas.toDataURL("image/webp", 0.82));
+        const mime = arquivo.type === "image/png" ? "image/png" : "image/jpeg";
+        resolve(canvas.toDataURL(mime, 0.9));
       };
       imagem.onerror = () => resolve(original);
       imagem.src = original;
     });
-  }
-
-  async function normalizarFotoExistente(url: string): Promise<string> {
-    const response = await fetch(url, { cache: "no-store" });
-    if (!response.ok) {
-      throw new Error(`Não foi possível baixar a foto (${response.status}).`);
-    }
-
-    const blob = await response.blob();
-    const objectUrl = URL.createObjectURL(blob);
-
-    try {
-      return await new Promise<string>((resolve, reject) => {
-        const imagem = new Image();
-        imagem.onload = () => {
-          const maximo = 900;
-          const escala = Math.min(1, maximo / Math.max(imagem.width, imagem.height));
-          const largura = Math.max(1, Math.round(imagem.width * escala));
-          const altura = Math.max(1, Math.round(imagem.height * escala));
-          const canvas = document.createElement("canvas");
-          canvas.width = largura;
-          canvas.height = altura;
-          const contexto = canvas.getContext("2d");
-          if (!contexto) {
-            reject(new Error("Não foi possível preparar a foto para otimização."));
-            return;
-          }
-          contexto.drawImage(imagem, 0, 0, largura, altura);
-          resolve(canvas.toDataURL("image/webp", 0.82));
-        };
-        imagem.onerror = () => reject(new Error("Não foi possível abrir a foto."));
-        imagem.src = objectUrl;
-      });
-    } finally {
-      URL.revokeObjectURL(objectUrl);
-    }
-  }
-
-  async function otimizarFotosElenco() {
-    const comFoto = jogadores.filter((jogador) => jogador.foto_url);
-    if (!comFoto.length) {
-      setMensagem("Não há fotos cadastradas para otimizar.");
-      return;
-    }
-
-    if (!window.confirm(`Otimizar ${comFoto.length} foto(s) do elenco? Esse processo pode levar alguns minutos.`)) {
-      return;
-    }
-
-    setOtimizandoFotos(true);
-    let sucesso = 0;
-    let falhas = 0;
-
-    try {
-      for (let indice = 0; indice < comFoto.length; indice += 1) {
-        const jogador = comFoto[indice];
-        setMensagem(`Otimizando foto ${indice + 1}/${comFoto.length}: ${jogador.nome_guerra}`);
-
-        try {
-          const fotoDataUrl = await normalizarFotoExistente(jogador.foto_url!);
-          const response = await fetch(`${API_URL}/api/admin/elenco/${jogador.id}`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json", ...authHeaders },
-            body: JSON.stringify({
-              nome_completo: jogador.nome_completo,
-              nome_guerra: jogador.nome_guerra,
-              posicao: jogador.posicao,
-              nacionalidade: jogador.nacionalidade || "Brasil",
-              nascimento: jogador.nascimento,
-              numero: jogador.posicao === "Técnico" ? null : jogador.numero,
-              foto_data_url: fotoDataUrl,
-              remover_foto: false,
-            }),
-          });
-
-          if (!response.ok) {
-            throw new Error(`API respondeu ${response.status}.`);
-          }
-          sucesso += 1;
-        } catch {
-          falhas += 1;
-        }
-      }
-
-      await carregarDados();
-      setMensagem(
-        falhas
-          ? `Otimização concluída: ${sucesso} foto(s) otimizadas e ${falhas} com falha.`
-          : `Otimização concluída: ${sucesso} foto(s) ficaram mais leves.`
-      );
-    } finally {
-      setOtimizandoFotos(false);
-    }
   }
 
   async function colarFotoJogador(event: ClipboardEvent<HTMLElement>) {
@@ -529,9 +392,8 @@ export default function AdminPage() {
     event.preventDefault();
     setMensagem(null);
 
-    const tecnico = posicaoJogador === "Técnico";
-    const numero = tecnico ? null : Number(numeroJogador);
-    if (!tecnico && (!Number.isInteger(numero) || Number(numero) < 0 || Number(numero) > 999)) {
+    const numero = Number(numeroJogador);
+    if (!Number.isInteger(numero) || numero < 0 || numero > 999) {
       setMensagem("Informe um número de camisa válido.");
       return;
     }
@@ -550,8 +412,6 @@ export default function AdminPage() {
           body: JSON.stringify({
             nome_completo: nomeCompletoJogador,
             nome_guerra: nomeGuerraJogador,
-            posicao: posicaoJogador,
-            nacionalidade: nacionalidadeJogador.trim() || "Brasil",
             nascimento: nascimentoJogador,
             numero,
             foto_data_url: fotoJogadorDataUrl || null,
@@ -679,26 +539,8 @@ export default function AdminPage() {
 
       {mensagem && <div className="admin-alert">{mensagem}</div>}
 
-      <nav className="admin-tabs" aria-label="Seções do painel administrativo">
-        <button
-          type="button"
-          className={abaAdmin === "geral" ? "active" : ""}
-          onClick={() => setAbaAdmin("geral")}
-        >
-          Geral
-        </button>
-        <button
-          type="button"
-          className={abaAdmin === "elenco" ? "active" : ""}
-          onClick={() => setAbaAdmin("elenco")}
-        >
-          Elenco
-          <span>{jogadores.length}</span>
-        </button>
-      </nav>
-
-      <section className={`admin-grid ${abaAdmin === "elenco" ? "admin-grid-elenco" : "admin-grid-geral"}`}>
-        <article className="admin-panel admin-tab-geral">
+      <section className="admin-grid">
+        <article className="admin-panel">
           <div className="admin-panel-heading">
             <div>
               <span className="eyebrow">CAPA DO SITE</span>
@@ -769,20 +611,6 @@ export default function AdminPage() {
             <span>{jogadores.length} jogador(es)</span>
           </div>
 
-          <div className="admin-squad-actions">
-            <button
-              className="admin-secondary-button"
-              type="button"
-              onClick={otimizarFotosElenco}
-              disabled={otimizandoFotos || jogadores.length === 0}
-            >
-              {otimizandoFotos ? "Otimizando fotos..." : "Otimizar fotos existentes"}
-            </button>
-            <span className="admin-photo-optimization-note">
-              Reduz o peso das fotos já cadastradas para acelerar o carregamento do Elenco.
-            </span>
-          </div>
-
           <form className="admin-form" onSubmit={salvarJogador}>
             <label>
               Nome completo
@@ -804,35 +632,6 @@ export default function AdminPage() {
               />
             </label>
 
-            <label>
-              Posição
-              <select
-                value={posicaoJogador}
-                onChange={(event) => {
-                  const novaPosicao = event.target.value as PosicaoElenco;
-                  setPosicaoJogador(novaPosicao);
-                  if (novaPosicao === "Técnico") setNumeroJogador("");
-                }}
-                required
-              >
-                {POSICOES_ELENCO.map((posicao) => (
-                  <option key={posicao} value={posicao}>
-                    {posicao}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label>
-              Nacionalidade
-              <input
-                value={nacionalidadeJogador}
-                onChange={(event) => setNacionalidadeJogador(event.target.value)}
-                placeholder="Brasil"
-                required
-              />
-            </label>
-
             <div className="admin-squad-form-row">
               <label>
                 Data de nascimento
@@ -844,25 +643,18 @@ export default function AdminPage() {
                 />
               </label>
 
-              {posicaoJogador === "Técnico" ? (
-                <label>
-                  Número da camisa
-                  <input value="Não se aplica" disabled />
-                </label>
-              ) : (
-                <label>
-                  Número da camisa
-                  <input
-                    type="number"
-                    min={0}
-                    max={999}
-                    value={numeroJogador}
-                    onChange={(event) => setNumeroJogador(event.target.value)}
-                    placeholder="10"
-                    required
-                  />
-                </label>
-              )}
+              <label>
+                Número da camisa
+                <input
+                  type="number"
+                  min={0}
+                  max={999}
+                  value={numeroJogador}
+                  onChange={(event) => setNumeroJogador(event.target.value)}
+                  placeholder="10"
+                  required
+                />
+              </label>
             </div>
 
             <div>
@@ -920,67 +712,43 @@ export default function AdminPage() {
             </div>
           </form>
 
-          <div className="admin-squad-roster">
-            <div className="admin-squad-roster-heading">
-              <div>
-                <span className="eyebrow">JOGADORES CADASTRADOS</span>
-                <h3>Elenco atual</h3>
-              </div>
-              <span>{jogadores.length} cadastrado(s)</span>
-            </div>
+          <div className="admin-squad-list">
+            {jogadores.map((jogador) => (
+              <div className="admin-squad-item" key={jogador.id}>
+                <div className="admin-squad-avatar">
+                  {jogador.foto_url ? (
+                    <img src={jogador.foto_url} alt={jogador.nome_guerra} />
+                  ) : (
+                    <span>{jogador.numero}</span>
+                  )}
+                </div>
 
-            {jogadoresOrdenados.length > 0 ? (
-              <div className="admin-squad-table-wrap">
-                <table className="admin-squad-table">
-                  <thead>
-                    <tr>
-                      <th>Nome de guerra</th>
-                      <th>Número</th>
-                      <th>Posição</th>
-                      <th aria-label="Ações"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {jogadoresOrdenados.map((jogador) => (
-                      <tr key={jogador.id}>
-                        <td>
-                          <div className="admin-squad-name-cell">
-                            <div className="admin-squad-avatar admin-squad-avatar-small">
-                              {jogador.foto_url ? (
-                                <img src={jogador.foto_url} alt="" />
-                              ) : (
-                                <span>{jogador.numero ?? "CAM"}</span>
-                              )}
-                            </div>
-                            <strong>{jogador.nome_guerra}</strong>
-                          </div>
-                        </td>
-                        <td><strong>{jogador.numero == null ? "—" : `#${jogador.numero}`}</strong></td>
-                        <td><span className="admin-position-pill">{jogador.posicao}</span></td>
-                        <td>
-                          <div className="admin-squad-item-actions">
-                            <button
-                              className="admin-secondary-button"
-                              type="button"
-                              onClick={() => prepararEdicaoJogador(jogador)}
-                            >
-                              Editar
-                            </button>
-                            <button
-                              className="admin-danger-button"
-                              type="button"
-                              onClick={() => excluirJogador(jogador)}
-                            >
-                              Remover
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <div className="admin-squad-copy">
+                  <strong>#{jogador.numero} · {jogador.nome_guerra}</strong>
+                  <span>{jogador.nome_completo}</span>
+                  <small>{jogador.idade} anos · {jogador.nascimento.split("-").reverse().join("/")}</small>
+                </div>
+
+                <div className="admin-squad-item-actions">
+                  <button
+                    className="admin-secondary-button"
+                    type="button"
+                    onClick={() => prepararEdicaoJogador(jogador)}
+                  >
+                    Editar
+                  </button>
+                  <button
+                    className="admin-danger-button"
+                    type="button"
+                    onClick={() => excluirJogador(jogador)}
+                  >
+                    Remover
+                  </button>
+                </div>
               </div>
-            ) : (
+            ))}
+
+            {jogadores.length === 0 && (
               <div className="admin-squad-empty">
                 Nenhum jogador cadastrado ainda.
               </div>
@@ -988,7 +756,7 @@ export default function AdminPage() {
           </div>
         </article>
 
-        <article className="admin-panel admin-tab-geral">
+        <article className="admin-panel">
           <div className="admin-panel-heading">
             <div>
               <span className="eyebrow">CONTEÚDO</span>
@@ -1051,7 +819,7 @@ export default function AdminPage() {
           </div>
         </article>
 
-        <article className="admin-panel admin-tab-geral">
+        <article className="admin-panel">
           <div className="admin-panel-heading">
             <div>
               <span className="eyebrow">RADAR DO X</span>
@@ -1103,7 +871,7 @@ export default function AdminPage() {
           </div>
         </article>
 
-        <article className="admin-panel admin-tab-geral">
+        <article className="admin-panel">
           <div className="admin-panel-heading">
             <div>
               <span className="eyebrow">YOUTUBE</span>
@@ -1217,61 +985,6 @@ export default function AdminPage() {
       </section>
 
       <style jsx global>{`
-        .admin-tabs {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          margin: 0 0 18px;
-          padding: 6px;
-          border: 1px solid #dedede;
-          border-radius: 14px;
-          background: #ffffff;
-        }
-
-        .admin-tabs button {
-          min-height: 42px;
-          display: inline-flex;
-          align-items: center;
-          gap: 8px;
-          padding: 0 18px;
-          border: 0;
-          border-radius: 10px;
-          background: transparent;
-          color: #4b5563;
-          font-weight: 800;
-          cursor: pointer;
-        }
-
-        .admin-tabs button.active {
-          background: #080808;
-          color: #ffffff;
-        }
-
-        .admin-tabs button span {
-          min-width: 22px;
-          height: 22px;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          padding: 0 6px;
-          border-radius: 999px;
-          background: #eeeeee;
-          font-size: 11px;
-        }
-
-        .admin-tabs button.active span {
-          background: rgba(255, 255, 255, 0.18);
-          color: #ffffff;
-        }
-
-        .admin-grid-geral .admin-squad-panel {
-          display: none;
-        }
-
-        .admin-grid-elenco .admin-tab-geral {
-          display: none;
-        }
-
         .admin-squad-panel {
           grid-column: 1 / -1;
         }
@@ -1287,12 +1000,6 @@ export default function AdminPage() {
           margin-bottom: 8px;
           font-size: 13px;
           font-weight: 700;
-        }
-
-        .admin-photo-optimization-note {
-          color: #8a8f9c;
-          font-size: 12px;
-          align-self: center;
         }
 
         .admin-photo-paste {
@@ -1351,87 +1058,6 @@ export default function AdminPage() {
           display: flex;
           flex-wrap: wrap;
           gap: 10px;
-        }
-
-        .admin-squad-roster {
-          margin-top: 30px;
-          padding-top: 24px;
-          border-top: 1px solid #e5e7eb;
-        }
-
-        .admin-squad-roster-heading {
-          display: flex;
-          align-items: flex-end;
-          justify-content: space-between;
-          gap: 16px;
-          margin-bottom: 14px;
-        }
-
-        .admin-squad-roster-heading h3 {
-          margin: 2px 0 0;
-          font-size: 22px;
-        }
-
-        .admin-squad-roster-heading > span {
-          color: #9ca3af;
-          font-size: 12px;
-        }
-
-        .admin-squad-table-wrap {
-          overflow-x: auto;
-          border: 1px solid #e5e7eb;
-          border-radius: 14px;
-        }
-
-        .admin-squad-table {
-          width: 100%;
-          min-width: 720px;
-          border-collapse: collapse;
-        }
-
-        .admin-squad-table th,
-        .admin-squad-table td {
-          padding: 12px 14px;
-          text-align: left;
-          border-bottom: 1px solid #eceff3;
-          vertical-align: middle;
-        }
-
-        .admin-squad-table th {
-          color: #9ca3af;
-          font-size: 11px;
-          font-weight: 850;
-          letter-spacing: 0.06em;
-          text-transform: uppercase;
-        }
-
-        .admin-squad-table tbody tr:last-child td {
-          border-bottom: 0;
-        }
-
-        .admin-squad-name-cell {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-        }
-
-        .admin-squad-avatar-small {
-          width: 42px !important;
-          height: 42px !important;
-          border-radius: 10px !important;
-          flex: 0 0 42px;
-        }
-
-        .admin-position-pill {
-          display: inline-flex;
-          align-items: center;
-          min-height: 30px;
-          padding: 0 10px;
-          border-radius: 999px;
-          background: #f3f4f6;
-          font-size: 12px;
-          font-weight: 800;
-          white-space: nowrap;
         }
 
         .admin-squad-list {

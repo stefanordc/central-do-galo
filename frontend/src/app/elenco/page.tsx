@@ -1,5 +1,5 @@
 import CentralDoGaloPage from "../../components/CentralDoGaloPage";
 
 export default function Page() {
-  return <CentralDoGaloPage initialSection="videos" />;
+  return <CentralDoGaloPage initialSection="elenco" />;
 }

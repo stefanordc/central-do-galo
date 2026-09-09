@@ -1,0 +1,585 @@
+from __future__ import annotations
+
+import json
+import math
+from collections import defaultdict
+from datetime import date
+from typing import Any
+
+from app.db.pool import pool
+from app.services.jogo_service import SOFASCORE_TEAM_ID, _sofascore_get
+
+
+POSICOES_ORDEM = {
+    "G": 0,
+    "D": 1,
+    "M": 2,
+    "F": 3,
+}
+
+
+def _to_number(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        number = float(value)
+        return number if math.isfinite(number) else None
+
+    text = str(value).strip()
+    if not text:
+        return None
+
+    text = (
+        text.replace("%", "")
+        .replace("km", "")
+        .replace(" ", "")
+        .replace(",", ".")
+    )
+    try:
+        number = float(text)
+        return number if math.isfinite(number) else None
+    except ValueError:
+        return None
+
+
+def _first_number(stats: dict[str, Any], *keys: str) -> float:
+    for key in keys:
+        if key in stats:
+            value = _to_number(stats.get(key))
+            if value is not None:
+                return value
+    return 0.0
+
+
+def _ano_sql() -> str:
+    return "extract(year from (j.inicio_em at time zone 'America/Sao_Paulo')) = %s"
+
+
+def listar_anos_disponiveis() -> list[int]:
+    sql = f"""
+        select distinct extract(year from (inicio_em at time zone 'America/Sao_Paulo'))::int as ano
+        from public.jogos
+        where id_externo like 'sofascore:%%'
+        order by ano desc
+    """
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql)
+            return [int(row[0]) for row in cur.fetchall() if row[0] is not None]
+
+
+def _jogos_para_coleta(ano: int, forcar: bool = False) -> list[dict[str, Any]]:
+    filtro_pendente = "" if forcar else "and e.jogo_id is null"
+    sql = f"""
+        select
+            j.id,
+            j.id_externo,
+            j.mandante,
+            j.visitante,
+            j.metadados,
+            j.inicio_em
+        from public.jogos j
+        left join public.estatisticas_jogos_sofascore e on e.jogo_id = j.id
+        where j.status = 'finalizado'
+          and j.id_externo like 'sofascore:%%'
+          and {_ano_sql()}
+          {filtro_pendente}
+        order by j.inicio_em asc
+    """
+
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (ano,))
+            colunas = [desc.name for desc in cur.description]
+            return [dict(zip(colunas, row, strict=True)) for row in cur.fetchall()]
+
+
+def _event_id(jogo: dict[str, Any]) -> int | None:
+    metadados = jogo.get("metadados") or {}
+    if isinstance(metadados, str):
+        try:
+            metadados = json.loads(metadados)
+        except Exception:
+            metadados = {}
+
+    event_id = ((metadados.get("sofascore") or {}).get("event_id"))
+    if event_id is None:
+        externo = str(jogo.get("id_externo") or "")
+        if externo.startswith("sofascore:"):
+            event_id = externo.split(":", 1)[1]
+
+    try:
+        return int(event_id)
+    except (TypeError, ValueError):
+        return None
+
+
+def _lado_galo(jogo: dict[str, Any]) -> str:
+    metadados = jogo.get("metadados") or {}
+    if isinstance(metadados, str):
+        try:
+            metadados = json.loads(metadados)
+        except Exception:
+            metadados = {}
+
+    team_ids = ((metadados.get("sofascore") or {}).get("team_ids") or {})
+    if team_ids.get("home") == SOFASCORE_TEAM_ID:
+        return "home"
+    if team_ids.get("away") == SOFASCORE_TEAM_ID:
+        return "away"
+
+    nome_home = str(jogo.get("mandante") or "").lower()
+    if "atlético mineiro" in nome_home or "atletico mineiro" in nome_home:
+        return "home"
+    return "away"
+
+
+def _upsert_estatisticas_jogo(
+    jogo_id: str,
+    event_id: int,
+    lado_galo: str,
+    payload: dict[str, Any],
+) -> None:
+    sql = """
+        insert into public.estatisticas_jogos_sofascore (
+            jogo_id, event_id, lado_galo, estatisticas, coletado_em, atualizado_em
+        )
+        values (%(jogo_id)s, %(event_id)s, %(lado_galo)s, %(estatisticas)s::jsonb, now(), now())
+        on conflict (jogo_id) do update
+        set event_id = excluded.event_id,
+            lado_galo = excluded.lado_galo,
+            estatisticas = excluded.estatisticas,
+            atualizado_em = now()
+    """
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                sql,
+                {
+                    "jogo_id": jogo_id,
+                    "event_id": event_id,
+                    "lado_galo": lado_galo,
+                    "estatisticas": json.dumps(payload, ensure_ascii=False),
+                },
+            )
+        conn.commit()
+
+
+def _salvar_jogadores_lineup(
+    jogo_id: str,
+    event_id: int,
+    lado_galo: str,
+    payload: dict[str, Any],
+) -> int:
+    bloco = payload.get(lado_galo) or {}
+    players = bloco.get("players") or []
+    if not isinstance(players, list):
+        players = []
+
+    sql_delete = "delete from public.estatisticas_jogadores_sofascore where jogo_id = %s"
+    sql_insert = """
+        insert into public.estatisticas_jogadores_sofascore (
+            jogo_id, event_id, jogador_id, nome, posicao, camisa, titular,
+            estatisticas, coletado_em, atualizado_em
+        )
+        values (
+            %(jogo_id)s, %(event_id)s, %(jogador_id)s, %(nome)s, %(posicao)s,
+            %(camisa)s, %(titular)s, %(estatisticas)s::jsonb, now(), now()
+        )
+        on conflict (jogo_id, jogador_id) do update
+        set nome = excluded.nome,
+            posicao = excluded.posicao,
+            camisa = excluded.camisa,
+            titular = excluded.titular,
+            estatisticas = excluded.estatisticas,
+            atualizado_em = now()
+    """
+
+    linhas: list[dict[str, Any]] = []
+    for item in players:
+        if not isinstance(item, dict):
+            continue
+        player = item.get("player") or {}
+        jogador_id = player.get("id")
+        nome = player.get("name") or player.get("shortName")
+        if jogador_id is None or not nome:
+            continue
+
+        statistics = item.get("statistics") or {}
+        camisa = item.get("shirtNumber")
+        try:
+            camisa = int(camisa) if camisa not in (None, "") else None
+        except (TypeError, ValueError):
+            camisa = None
+
+        linhas.append(
+            {
+                "jogo_id": jogo_id,
+                "event_id": event_id,
+                "jogador_id": int(jogador_id),
+                "nome": str(nome),
+                "posicao": player.get("position") or item.get("position"),
+                "camisa": camisa,
+                "titular": not bool(item.get("substitute", False)),
+                "estatisticas": json.dumps(statistics, ensure_ascii=False),
+            }
+        )
+
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql_delete, (jogo_id,))
+            for linha in linhas:
+                cur.execute(sql_insert, linha)
+        conn.commit()
+
+    return len(linhas)
+
+
+def sincronizar_estatisticas_sofascore(
+    ano: int,
+    *,
+    forcar: bool = False,
+    limite: int | None = None,
+) -> dict[str, Any]:
+    jogos = _jogos_para_coleta(ano, forcar=forcar)
+    if limite is not None:
+        jogos = jogos[: max(0, int(limite))]
+
+    processados = 0
+    jogadores_salvos = 0
+    erros: list[str] = []
+
+    for indice, jogo in enumerate(jogos, 1):
+        event_id = _event_id(jogo)
+        if event_id is None:
+            erros.append(f"jogo {jogo.get('id')}: event_id ausente")
+            continue
+
+        lado = _lado_galo(jogo)
+        try:
+            estatisticas = _sofascore_get(f"/event/{event_id}/statistics")
+            lineups = _sofascore_get(f"/event/{event_id}/lineups")
+
+            _upsert_estatisticas_jogo(str(jogo["id"]), event_id, lado, estatisticas)
+            jogadores_salvos += _salvar_jogadores_lineup(
+                str(jogo["id"]), event_id, lado, lineups
+            )
+            processados += 1
+        except Exception as exc:
+            erros.append(f"{event_id}: {exc}")
+
+    return {
+        "fonte": "sofascore",
+        "ano": ano,
+        "encontrados": len(jogos),
+        "processados": processados,
+        "jogadores_salvos": jogadores_salvos,
+        "erros": erros,
+    }
+
+
+def status_dados(ano: int) -> dict[str, Any]:
+    sql = f"""
+        select
+            count(*) filter (where j.status = 'finalizado') as jogos_finalizados,
+            count(e.jogo_id) as jogos_com_estatisticas,
+            max(e.atualizado_em) as atualizado_em
+        from public.jogos j
+        left join public.estatisticas_jogos_sofascore e on e.jogo_id = j.id
+        where j.id_externo like 'sofascore:%%'
+          and {_ano_sql()}
+    """
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (ano,))
+            row = cur.fetchone()
+
+    total = int(row[0] or 0)
+    coletados = int(row[1] or 0)
+    return {
+        "ano": ano,
+        "jogos_finalizados": total,
+        "jogos_com_estatisticas": coletados,
+        "pendentes": max(0, total - coletados),
+        "atualizado_em": row[2].isoformat() if row and row[2] else None,
+    }
+
+
+def _linhas_estatisticas_coletivas(ano: int) -> list[dict[str, Any]]:
+    sql = f"""
+        select
+            e.estatisticas,
+            e.lado_galo,
+            j.gols_mandante,
+            j.gols_visitante
+        from public.estatisticas_jogos_sofascore e
+        join public.jogos j on j.id = e.jogo_id
+        where {_ano_sql()}
+          and j.status = 'finalizado'
+        order by j.inicio_em asc
+    """
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (ano,))
+            colunas = [desc.name for desc in cur.description]
+            return [dict(zip(colunas, row, strict=True)) for row in cur.fetchall()]
+
+
+def _item_value(item: dict[str, Any], lado: str) -> tuple[float | None, str | None]:
+    numeric = item.get(f"{lado}Value")
+    number = _to_number(numeric)
+    display = item.get(lado)
+    if number is None:
+        number = _to_number(display)
+    return number, str(display) if display is not None else None
+
+
+def _infer_unit(display: str | None, name: str) -> str | None:
+    display = display or ""
+    lower = name.lower()
+    if "%" in display or "percentage" in lower or "possession" in lower or "accuracy" in lower:
+        return "%"
+    if "km" in display or "distance" in lower:
+        return "km"
+    return None
+
+
+def dados_coletivos(ano: int) -> dict[str, Any]:
+    rows = _linhas_estatisticas_coletivas(ano)
+
+    vitorias = empates = derrotas = 0
+    gols_pro = gols_contra = 0
+    agregados: dict[str, dict[str, Any]] = {}
+
+    for row in rows:
+        lado = row["lado_galo"]
+        gm = row.get("gols_mandante")
+        gv = row.get("gols_visitante")
+        if gm is not None and gv is not None:
+            pro = int(gm if lado == "home" else gv)
+            contra = int(gv if lado == "home" else gm)
+            gols_pro += pro
+            gols_contra += contra
+            if pro > contra:
+                vitorias += 1
+            elif pro == contra:
+                empates += 1
+            else:
+                derrotas += 1
+
+        payload = row.get("estatisticas") or {}
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except Exception:
+                payload = {}
+
+        periods = payload.get("statistics") or []
+        period_all = next(
+            (p for p in periods if str(p.get("period") or "").upper() == "ALL"),
+            periods[0] if periods else {},
+        )
+
+        for group in period_all.get("groups") or []:
+            group_name = str(group.get("groupName") or "Outros")
+            for item in group.get("statisticsItems") or []:
+                if not isinstance(item, dict):
+                    continue
+                name = str(item.get("name") or item.get("key") or "").strip()
+                if not name:
+                    continue
+                key = str(item.get("key") or name)
+                value, display = _item_value(item, lado)
+                if value is None:
+                    continue
+
+                bucket = agregados.setdefault(
+                    key,
+                    {
+                        "chave": key,
+                        "nome": name,
+                        "grupo": group_name,
+                        "unidade": _infer_unit(display, name),
+                        "soma": 0.0,
+                        "contagem": 0,
+                    },
+                )
+                bucket["soma"] += value
+                bucket["contagem"] += 1
+
+    jogos = len(rows)
+    pontos = vitorias * 3 + empates
+    aproveitamento = round((pontos / (jogos * 3) * 100), 1) if jogos else 0.0
+
+    metricas = []
+    for bucket in agregados.values():
+        count = bucket["contagem"]
+        media = bucket["soma"] / count if count else 0
+        metricas.append(
+            {
+                "chave": bucket["chave"],
+                "nome": bucket["nome"],
+                "grupo": bucket["grupo"],
+                "unidade": bucket["unidade"],
+                "media": round(media, 2),
+                "total": round(bucket["soma"], 2),
+                "jogos_com_dado": count,
+            }
+        )
+
+    ordem_preferida = {
+        "ballPossession": 1,
+        "totalShotsOnGoal": 2,
+        "shotsOnGoal": 2,
+        "totalShots": 3,
+        "goalAttempts": 3,
+        "bigChanceCreated": 4,
+        "bigChances": 4,
+        "cornerKicks": 5,
+        "accuratePasses": 6,
+        "passes": 7,
+        "fouls": 8,
+        "yellowCards": 9,
+        "expectedGoals": 10,
+        "distanceCovered": 11,
+        "sprints": 12,
+    }
+    metricas.sort(key=lambda x: (ordem_preferida.get(x["chave"], 999), x["grupo"], x["nome"]))
+
+    return {
+        "ano": ano,
+        "resumo": {
+            "jogos": jogos,
+            "vitorias": vitorias,
+            "empates": empates,
+            "derrotas": derrotas,
+            "gols_pro": gols_pro,
+            "gols_contra": gols_contra,
+            "aproveitamento": aproveitamento,
+        },
+        "metricas": metricas,
+    }
+
+
+def _linhas_individuais(ano: int) -> list[dict[str, Any]]:
+    sql = f"""
+        select
+            p.jogador_id,
+            p.nome,
+            p.posicao,
+            p.camisa,
+            p.titular,
+            p.estatisticas,
+            j.inicio_em
+        from public.estatisticas_jogadores_sofascore p
+        join public.jogos j on j.id = p.jogo_id
+        where {_ano_sql()}
+          and j.status = 'finalizado'
+        order by j.inicio_em asc
+    """
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (ano,))
+            colunas = [desc.name for desc in cur.description]
+            return [dict(zip(colunas, row, strict=True)) for row in cur.fetchall()]
+
+
+def dados_individuais(ano: int) -> dict[str, Any]:
+    rows = _linhas_individuais(ano)
+    jogadores: dict[int, dict[str, Any]] = {}
+
+    for row in rows:
+        stats = row.get("estatisticas") or {}
+        if isinstance(stats, str):
+            try:
+                stats = json.loads(stats)
+            except Exception:
+                stats = {}
+
+        # Jogadores que ficaram no banco sem entrar costumam vir sem statistics.
+        if not stats:
+            continue
+
+        jogador_id = int(row["jogador_id"])
+        item = jogadores.setdefault(
+            jogador_id,
+            {
+                "jogador_id": jogador_id,
+                "nome": row["nome"],
+                "posicao": row.get("posicao"),
+                "camisa": row.get("camisa"),
+                "jogos": 0,
+                "titular": 0,
+                "minutos": 0.0,
+                "gols": 0.0,
+                "assistencias": 0.0,
+                "rating_soma": 0.0,
+                "rating_count": 0,
+                "finalizacoes": 0.0,
+                "passes_certos": 0.0,
+                "passes_chave": 0.0,
+                "desarmes": 0.0,
+                "interceptacoes": 0.0,
+                "duelos_ganhos": 0.0,
+            },
+        )
+
+        item["nome"] = row["nome"] or item["nome"]
+        item["posicao"] = row.get("posicao") or item["posicao"]
+        item["camisa"] = row.get("camisa") if row.get("camisa") is not None else item["camisa"]
+        item["jogos"] += 1
+        if row.get("titular"):
+            item["titular"] += 1
+
+        item["minutos"] += _first_number(stats, "minutesPlayed")
+        item["gols"] += _first_number(stats, "goals")
+        item["assistencias"] += _first_number(stats, "goalAssist", "assists")
+        item["finalizacoes"] += _first_number(stats, "totalShots", "totalShot")
+        item["passes_certos"] += _first_number(stats, "accuratePass")
+        item["passes_chave"] += _first_number(stats, "keyPass")
+        item["desarmes"] += _first_number(stats, "totalTackle", "tackles")
+        item["interceptacoes"] += _first_number(stats, "interceptionWon", "interceptions")
+        item["duelos_ganhos"] += _first_number(stats, "duelWon")
+
+        rating = _to_number(stats.get("rating"))
+        if rating is not None:
+            item["rating_soma"] += rating
+            item["rating_count"] += 1
+
+    resultado: list[dict[str, Any]] = []
+    for item in jogadores.values():
+        rating = (
+            round(item["rating_soma"] / item["rating_count"], 2)
+            if item["rating_count"]
+            else None
+        )
+        resultado.append(
+            {
+                "jogador_id": item["jogador_id"],
+                "nome": item["nome"],
+                "posicao": item["posicao"],
+                "camisa": item["camisa"],
+                "foto_url": f"https://img.sofascore.com/api/v1/player/{item['jogador_id']}/image",
+                "jogos": int(item["jogos"]),
+                "titular": int(item["titular"]),
+                "minutos": int(round(item["minutos"])),
+                "gols": int(round(item["gols"])),
+                "assistencias": int(round(item["assistencias"])),
+                "nota_media": rating,
+                "finalizacoes": int(round(item["finalizacoes"])),
+                "passes_certos": int(round(item["passes_certos"])),
+                "passes_chave": int(round(item["passes_chave"])),
+                "desarmes": int(round(item["desarmes"])),
+                "interceptacoes": int(round(item["interceptacoes"])),
+                "duelos_ganhos": int(round(item["duelos_ganhos"])),
+            }
+        )
+
+    resultado.sort(
+        key=lambda x: (
+            -x["minutos"],
+            POSICOES_ORDEM.get(str(x.get("posicao") or ""), 99),
+            x["nome"],
+        )
+    )
+    return {"ano": ano, "jogadores": resultado}

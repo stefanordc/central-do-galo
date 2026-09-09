@@ -1,7 +1,5 @@
 import secrets
-from datetime import date
 from typing import Literal
-from uuid import UUID
 
 from fastapi import APIRouter, Header, HTTPException, status
 from pydantic import BaseModel, Field
@@ -20,12 +18,6 @@ from app.services.source_service import (
 from app.services.site_config_service import (
     atualizar_capa_site,
     obter_capa_site,
-)
-from app.services.jogador_service import (
-    atualizar_jogador,
-    criar_jogador,
-    excluir_jogador,
-    listar_elenco_admin,
 )
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -66,26 +58,6 @@ class CapaSiteUpdateIn(BaseModel):
     ativo: bool = False
     tipo: Literal["imagem", "video"] = "imagem"
     media_url: str | None = Field(default=None, max_length=3000)
-
-
-class JogadorElencoIn(BaseModel):
-    nome_completo: str = Field(min_length=2, max_length=220)
-    nome_guerra: str = Field(min_length=1, max_length=120)
-    posicao: Literal[
-        "Goleiro",
-        "Lateral-Direito",
-        "Lateral-Esquerdo",
-        "Zagueiro",
-        "Volante",
-        "Meia",
-        "Atacante",
-        "Técnico",
-    ]
-    nacionalidade: str = Field(default="Brasil", min_length=2, max_length=100)
-    nascimento: date
-    numero: int | None = Field(default=None, ge=0, le=999)
-    foto_data_url: str | None = None
-    remover_foto: bool = False
 
 
 def _validar_admin(authorization: str | None) -> None:
@@ -179,79 +151,6 @@ def post_canal_youtube_admin(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except UniqueViolation as exc:
         raise HTTPException(status_code=409, detail="Esse canal do YouTube já está cadastrado.") from exc
-
-
-@router.get("/elenco")
-def get_elenco_admin(authorization: str | None = Header(default=None)) -> list[dict]:
-    _validar_admin(authorization)
-    return listar_elenco_admin()
-
-
-@router.post("/elenco", status_code=status.HTTP_201_CREATED)
-def post_jogador_elenco_admin(
-    payload: JogadorElencoIn,
-    authorization: str | None = Header(default=None),
-) -> dict:
-    _validar_admin(authorization)
-    try:
-        return criar_jogador(
-            nome_completo=payload.nome_completo,
-            nome_guerra=payload.nome_guerra,
-            nascimento=payload.nascimento,
-            numero=payload.numero,
-            posicao=payload.posicao,
-            nacionalidade=payload.nacionalidade,
-            foto_data_url=payload.foto_data_url,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except UniqueViolation as exc:
-        raise HTTPException(
-            status_code=409,
-            detail="Esse número de camisa já está em uso no elenco atual.",
-        ) from exc
-
-
-@router.put("/elenco/{jogador_id}")
-def put_jogador_elenco_admin(
-    jogador_id: UUID,
-    payload: JogadorElencoIn,
-    authorization: str | None = Header(default=None),
-) -> dict:
-    _validar_admin(authorization)
-    try:
-        return atualizar_jogador(
-            jogador_id,
-            nome_completo=payload.nome_completo,
-            nome_guerra=payload.nome_guerra,
-            nascimento=payload.nascimento,
-            numero=payload.numero,
-            posicao=payload.posicao,
-            nacionalidade=payload.nacionalidade,
-            foto_data_url=payload.foto_data_url,
-            remover_foto=payload.remover_foto,
-        )
-    except LookupError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except UniqueViolation as exc:
-        raise HTTPException(
-            status_code=409,
-            detail="Esse número de camisa já está em uso no elenco atual.",
-        ) from exc
-
-
-@router.delete("/elenco/{jogador_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_jogador_elenco_admin(
-    jogador_id: UUID,
-    authorization: str | None = Header(default=None),
-) -> None:
-    _validar_admin(authorization)
-    try:
-        excluir_jogador(jogador_id)
-    except LookupError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/capa-publica")

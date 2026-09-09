@@ -1,0 +1,32 @@
+from uuid import UUID
+
+from fastapi import APIRouter, HTTPException, Response, status
+
+from app.services.jogador_service import listar_elenco_publico, obter_foto_jogador
+
+router = APIRouter(prefix="/elenco", tags=["elenco"])
+
+
+@router.get("")
+def get_elenco() -> list[dict]:
+    return listar_elenco_publico()
+
+
+@router.get("/{jogador_id}/foto")
+def get_foto_jogador(jogador_id: UUID) -> Response:
+    foto = obter_foto_jogador(jogador_id)
+    if foto is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Foto do jogador não encontrada.",
+        )
+
+    mime, conteudo = foto
+    return Response(
+        content=conteudo,
+        media_type=mime,
+        headers={
+            "Cache-Control": "public, max-age=31536000, immutable",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )

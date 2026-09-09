@@ -1,0 +1,539 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
+
+type Categoria = "todos" | "geral" | "ataque" | "defesa";
+type Aba = "coletivos" | "individual" | "comparacao";
+type ComparacaoAba = "temporadas" | "adversario";
+type ModoComparacao = "total" | "por_jogo" | "por_minuto";
+type Direcao = "asc" | "desc";
+
+type Filtros = {
+  temporadas: number[];
+  campeonatos: string[];
+  campeonatos_comparacao: string[];
+  jogadores: Array<{ id: number; nome_guerra: string; rotulo: string }>;
+  posicoes: Array<{ codigo: string; nome: string }>;
+  adversarios: Array<{ id: number; nome: string }>;
+};
+
+type MetricaColetiva = {
+  chave: string;
+  nome: string;
+  grupo: string;
+  categoria: Exclude<Categoria, "todos">;
+  unidade: string | null;
+  media: number | null;
+  por_minuto: number | null;
+  total: number | null;
+};
+
+type Coletivos = {
+  temporada: number;
+  campeonato: string | null;
+  resumo: {
+    jogos: number;
+    vitorias: number;
+    empates: number;
+    derrotas: number;
+    gols_pro: number;
+    gols_contra: number;
+    gols_por_jogo: number;
+    gols_por_minuto: number;
+    gols_sofridos_por_jogo: number;
+    gols_sofridos_por_minuto: number;
+    aproveitamento: number;
+  };
+  metricas: MetricaColetiva[];
+};
+
+type ColunaIndividual = {
+  chave: string;
+  nome: string;
+  categoria: Exclude<Categoria, "todos">;
+  unidade: string | null;
+};
+
+type Jogador = {
+  jogador_id: number;
+  nome: string;
+  nome_guerra: string;
+  rotulo: string;
+  posicao: string | null;
+  posicao_nome: string;
+  camisa: number | null;
+  foto_url: string;
+  jogos: number;
+  titular: number;
+  minutos: number;
+  nota_media: number | null;
+  soma_rating: number | null;
+  metricas: Record<string, number | null>;
+};
+
+type Individual = {
+  temporada: number;
+  campeonato: string | null;
+  jogador_id: number | null;
+  posicao: string | null;
+  colunas: ColunaIndividual[];
+  jogadores: Jogador[];
+};
+
+type ValorComparacao = {
+  total: number | null;
+  por_jogo: number | null;
+  por_minuto: number | null;
+};
+
+type CompTemporadas = {
+  campeonato: string | null;
+  temporadas: number[];
+  resumos: Record<string, Coletivos["resumo"]>;
+  metricas: Array<{
+    chave: string;
+    nome: string;
+    categoria: Exclude<Categoria, "todos">;
+    unidade: string | null;
+    valores: Record<string, ValorComparacao>;
+  }>;
+};
+
+type CompAdversario = {
+  temporada: number;
+  campeonato: string | null;
+  adversario_id: number | null;
+  adversario_nome: string;
+  jogos: number;
+  metricas: Array<{
+    chave: string;
+    nome: string;
+    categoria: Exclude<Categoria, "todos">;
+    unidade: string | null;
+    galo: ValorComparacao;
+    adversario: ValorComparacao;
+    diferenca: ValorComparacao;
+  }>;
+};
+
+type Ordenacao = { chave: string; direcao: Direcao };
+
+const API_URL = "/backend";
+
+function fmt(valor: number | null | undefined, unidade?: string | null, maxDigits = 2) {
+  if (valor == null || Number.isNaN(valor)) return "—";
+  const texto = valor.toLocaleString("pt-BR", {
+    maximumFractionDigits: Number.isInteger(valor) ? 0 : maxDigits,
+  });
+  return unidade ? `${texto} ${unidade}` : texto;
+}
+
+function proxima(atual: Ordenacao, chave: string): Ordenacao {
+  if (atual.chave !== chave) return { chave, direcao: "desc" };
+  return { chave, direcao: atual.direcao === "desc" ? "asc" : "desc" };
+}
+
+function cmp(a: unknown, b: unknown, direcao: Direcao) {
+  const vazioA = a == null;
+  const vazioB = b == null;
+  if (vazioA && vazioB) return 0;
+  if (vazioA) return 1;
+  if (vazioB) return -1;
+
+  let valor = 0;
+  if (typeof a === "number" && typeof b === "number") valor = a - b;
+  else valor = String(a).localeCompare(String(b), "pt-BR", { numeric: true });
+  return direcao === "asc" ? valor : -valor;
+}
+
+function SortHeader({ label, chave, ordenacao, onChange }: {
+  label: string;
+  chave: string;
+  ordenacao: Ordenacao;
+  onChange: (value: Ordenacao) => void;
+}) {
+  const ativo = ordenacao.chave === chave;
+  return (
+    <button type="button" className="dados-sort" onClick={() => onChange(proxima(ordenacao, chave))}>
+      {label}<span>{ativo ? (ordenacao.direcao === "asc" ? "↑" : "↓") : "↕"}</span>
+    </button>
+  );
+}
+
+function ScrollTable({ children }: { children: ReactNode }) {
+  const topRef = useRef<HTMLDivElement>(null);
+  const topInnerRef = useRef<HTMLDivElement>(null);
+  const tableRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const top = topRef.current;
+    const topInner = topInnerRef.current;
+    const table = tableRef.current;
+    if (!top || !topInner || !table) return;
+
+    let syncing = false;
+    const resize = () => {
+      topInner.style.width = `${table.scrollWidth}px`;
+      top.scrollLeft = table.scrollLeft;
+    };
+    const fromTop = () => {
+      if (syncing) return;
+      syncing = true;
+      table.scrollLeft = top.scrollLeft;
+      syncing = false;
+    };
+    const fromTable = () => {
+      if (syncing) return;
+      syncing = true;
+      top.scrollLeft = table.scrollLeft;
+      syncing = false;
+    };
+
+    top.addEventListener("scroll", fromTop);
+    table.addEventListener("scroll", fromTable);
+    const observer = new ResizeObserver(resize);
+    observer.observe(table);
+    if (table.firstElementChild) observer.observe(table.firstElementChild);
+    requestAnimationFrame(resize);
+
+    return () => {
+      top.removeEventListener("scroll", fromTop);
+      table.removeEventListener("scroll", fromTable);
+      observer.disconnect();
+    };
+  }, [children]);
+
+  return (
+    <>
+      <div className="dados-scroll-top" ref={topRef} aria-label="Rolagem horizontal da tabela">
+        <div ref={topInnerRef} />
+      </div>
+      <div className="dados-table-wrap" ref={tableRef}>{children}</div>
+    </>
+  );
+}
+
+export default function DadosSection() {
+  const [aba, setAba] = useState<Aba>("coletivos");
+  const [comparacaoAba, setComparacaoAba] = useState<ComparacaoAba>("temporadas");
+  const [modoComparacao, setModoComparacao] = useState<ModoComparacao>("por_jogo");
+  const [categoria, setCategoria] = useState<Categoria>("todos");
+  const [temporada, setTemporada] = useState(new Date().getFullYear());
+  const [campeonato, setCampeonato] = useState("");
+  const [jogadorId, setJogadorId] = useState("");
+  const [posicao, setPosicao] = useState("");
+  const [adversarioId, setAdversarioId] = useState("");
+
+  const [filtros, setFiltros] = useState<Filtros>({
+    temporadas: [], campeonatos: [], campeonatos_comparacao: [], jogadores: [], posicoes: [], adversarios: [],
+  });
+  const [coletivos, setColetivos] = useState<Coletivos | null>(null);
+  const [individual, setIndividual] = useState<Individual | null>(null);
+  const [compTemporadas, setCompTemporadas] = useState<CompTemporadas | null>(null);
+  const [compAdversario, setCompAdversario] = useState<CompAdversario | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [erro, setErro] = useState<string | null>(null);
+
+  const [sortColetivo, setSortColetivo] = useState<Ordenacao>({ chave: "nome", direcao: "asc" });
+  const [sortIndividual, setSortIndividual] = useState<Ordenacao>({ chave: "minutos", direcao: "desc" });
+  const [sortTemporadas, setSortTemporadas] = useState<Ordenacao>({ chave: "nome", direcao: "asc" });
+  const [sortAdversario, setSortAdversario] = useState<Ordenacao>({ chave: "nome", direcao: "asc" });
+
+  useEffect(() => {
+    let ativo = true;
+
+    async function carregar() {
+      setLoading(true);
+      try {
+        const base = new URLSearchParams({ temporada: String(temporada) });
+        if (campeonato) base.set("campeonato", campeonato);
+
+        const filtrosPromise = fetch(`${API_URL}/api/dados/filtros?${base}`, { cache: "no-store" });
+
+        let dadosPromise: Promise<Response>;
+        if (aba === "coletivos") {
+          dadosPromise = fetch(`${API_URL}/api/dados/coletivos?${base}`, { cache: "no-store" });
+        } else if (aba === "individual") {
+          const q = new URLSearchParams(base);
+          if (jogadorId) q.set("jogador_id", jogadorId);
+          if (posicao) q.set("posicao", posicao);
+          dadosPromise = fetch(`${API_URL}/api/dados/individual?${q}`, { cache: "no-store" });
+        } else if (comparacaoAba === "temporadas") {
+          const q = new URLSearchParams();
+          if (campeonato) q.set("campeonato", campeonato);
+          dadosPromise = fetch(`${API_URL}/api/dados/comparacao/temporadas?${q}`, { cache: "no-store" });
+        } else {
+          const q = new URLSearchParams(base);
+          if (adversarioId) q.set("adversario_id", adversarioId);
+          dadosPromise = fetch(`${API_URL}/api/dados/comparacao/adversario?${q}`, { cache: "no-store" });
+        }
+
+        const [filtrosResponse, dadosResponse] = await Promise.all([filtrosPromise, dadosPromise]);
+        if (!filtrosResponse.ok) throw new Error(`Filtros: HTTP ${filtrosResponse.status}`);
+        if (!dadosResponse.ok) throw new Error(`Dados: HTTP ${dadosResponse.status}`);
+
+        const [novosFiltros, dados] = await Promise.all([
+          filtrosResponse.json() as Promise<Filtros>,
+          dadosResponse.json(),
+        ]);
+        if (!ativo) return;
+        setFiltros(novosFiltros);
+
+        if (novosFiltros.temporadas.length && !novosFiltros.temporadas.includes(temporada)) {
+          setTemporada(novosFiltros.temporadas[0]);
+          return;
+        }
+
+        const campeonatosValidos =
+          aba === "comparacao" && comparacaoAba === "temporadas"
+            ? novosFiltros.campeonatos_comparacao
+            : novosFiltros.campeonatos;
+        if (campeonato && !campeonatosValidos.includes(campeonato)) {
+          setCampeonato("");
+          setJogadorId("");
+          setPosicao("");
+          setAdversarioId("");
+          return;
+        }
+
+        if (aba === "coletivos") setColetivos(dados as Coletivos);
+        else if (aba === "individual") setIndividual(dados as Individual);
+        else if (comparacaoAba === "temporadas") setCompTemporadas(dados as CompTemporadas);
+        else setCompAdversario(dados as CompAdversario);
+
+        setErro(null);
+      } catch (e) {
+        if (ativo) setErro(e instanceof Error ? e.message : "Não foi possível carregar os dados.");
+      } finally {
+        if (ativo) setLoading(false);
+      }
+    }
+
+    carregar();
+    return () => { ativo = false; };
+  }, [aba, comparacaoAba, temporada, campeonato, jogadorId, posicao, adversarioId]);
+
+  const filtrosPrincipais = true;
+
+  const coletivasFiltradas = [...(coletivos?.metricas ?? [])]
+    .filter((m) => categoria === "todos" || m.categoria === categoria)
+    .sort((a, b) => {
+      const k = sortColetivo.chave;
+      const va = k === "nome" ? a.nome : k === "grupo" ? a.grupo : a[k as keyof MetricaColetiva];
+      const vb = k === "nome" ? b.nome : k === "grupo" ? b.grupo : b[k as keyof MetricaColetiva];
+      return cmp(va, vb, sortColetivo.direcao);
+    });
+
+  const colunasIndividual = (individual?.colunas ?? []).filter(
+    (c) => categoria === "todos" || c.categoria === categoria
+  );
+  const jogadoresOrdenados = [...(individual?.jogadores ?? [])].sort((a, b) => {
+    const k = sortIndividual.chave;
+    const va = k === "rotulo" ? a.rotulo : k === "posicao_nome" ? a.posicao_nome : k in a ? a[k as keyof Jogador] : a.metricas[k];
+    const vb = k === "rotulo" ? b.rotulo : k === "posicao_nome" ? b.posicao_nome : k in b ? b[k as keyof Jogador] : b.metricas[k];
+    return cmp(va, vb, sortIndividual.direcao);
+  });
+
+  const metricasTemporadas = [...(compTemporadas?.metricas ?? [])]
+    .filter((m) => categoria === "todos" || m.categoria === categoria)
+    .sort((a, b) => {
+      const k = sortTemporadas.chave;
+      const va = k === "nome" ? a.nome : a.valores[k]?.[modoComparacao];
+      const vb = k === "nome" ? b.nome : b.valores[k]?.[modoComparacao];
+      return cmp(va, vb, sortTemporadas.direcao);
+    });
+
+  const metricasAdversario = [...(compAdversario?.metricas ?? [])]
+    .filter((m) => categoria === "todos" || m.categoria === categoria)
+    .sort((a, b) => {
+      const k = sortAdversario.chave;
+      const va = k === "nome" ? a.nome : a[k as "galo" | "adversario" | "diferenca"]?.[modoComparacao];
+      const vb = k === "nome" ? b.nome : b[k as "galo" | "adversario" | "diferenca"]?.[modoComparacao];
+      return cmp(va, vb, sortAdversario.direcao);
+    });
+
+  return (
+    <section className="dados-root">
+      <header className="dados-header">
+        <p className="dados-eyebrow">DADOS DO GALO</p>
+        <h2>Dados</h2>
+      </header>
+
+      <div className="dados-tabs" role="tablist" aria-label="Tipo de dado">
+        {([["coletivos", "Coletivos"], ["individual", "Individual"], ["comparacao", "Comparação"]] as Array<[Aba, string]>).map(([v, label]) => (
+          <button key={v} type="button" className={aba === v ? "active" : ""} onClick={() => { setAba(v); setCategoria("todos"); }}>{label}</button>
+        ))}
+      </div>
+
+      {aba === "comparacao" && (
+        <div className="dados-tabs dados-subtabs">
+          <button type="button" className={comparacaoAba === "temporadas" ? "active" : ""} onClick={() => setComparacaoAba("temporadas")}>Temporadas do Atlético</button>
+          <button type="button" className={comparacaoAba === "adversario" ? "active" : ""} onClick={() => setComparacaoAba("adversario")}>Atlético x adversário</button>
+        </div>
+      )}
+
+      {filtrosPrincipais && (
+        <div className="dados-filtros">
+          {!(aba === "comparacao" && comparacaoAba === "temporadas") && (
+            <label><span>Temporada</span><select value={temporada} onChange={(e) => { setTemporada(Number(e.target.value)); setCampeonato(""); setJogadorId(""); setPosicao(""); setAdversarioId(""); }}>
+              {(filtros.temporadas.length ? filtros.temporadas : [temporada]).map((t) => <option key={t} value={t}>{t}</option>)}
+            </select></label>
+          )}
+
+          <label><span>Campeonato</span><select value={campeonato} onChange={(e) => { setCampeonato(e.target.value); setJogadorId(""); setPosicao(""); setAdversarioId(""); }}>
+            <option value="">Todos os campeonatos</option>
+            {(aba === "comparacao" && comparacaoAba === "temporadas" ? filtros.campeonatos_comparacao : filtros.campeonatos)
+              .map((c) => <option key={c} value={c}>{c}</option>)}
+          </select></label>
+
+          {aba === "individual" && <>
+            <label><span>Jogador</span><select value={jogadorId} onChange={(e) => setJogadorId(e.target.value)}>
+              <option value="">Todos os jogadores</option>
+              {filtros.jogadores.map((j) => <option key={j.id} value={j.id}>{j.rotulo}</option>)}
+            </select></label>
+            <label><span>Posição</span><select value={posicao} onChange={(e) => setPosicao(e.target.value)}>
+              <option value="">Todas as posições</option>
+              {filtros.posicoes.map((p) => <option key={p.codigo} value={p.codigo}>{p.nome}</option>)}
+            </select></label>
+          </>}
+
+          {aba === "comparacao" && comparacaoAba === "adversario" && (
+            <label><span>Adversário</span><select value={adversarioId} onChange={(e) => setAdversarioId(e.target.value)}>
+              <option value="">Todos os adversários</option>
+              {filtros.adversarios.map((a) => <option key={a.id} value={a.id}>{a.nome}</option>)}
+            </select></label>
+          )}
+        </div>
+      )}
+
+      {aba === "comparacao" && (
+        <div className="dados-modos" aria-label="Forma de visualização da comparação">
+          {([['total', 'Total'], ['por_jogo', 'Por jogo'], ['por_minuto', 'Por minuto']] as Array<[ModoComparacao, string]>).map(([v, label]) => (
+            <button key={v} type="button" className={modoComparacao === v ? "active" : ""} onClick={() => setModoComparacao(v)}>{label}</button>
+          ))}
+        </div>
+      )}
+
+      <div className="dados-rapidos" aria-label="Filtro rápido">
+        {([["todos", "Todos"], ["geral", "Geral"], ["ataque", "Ataque"], ["defesa", "Defesa"]] as Array<[Categoria, string]>).map(([v, label]) => (
+          <button key={v} type="button" className={categoria === v ? "active" : ""} onClick={() => setCategoria(v)}>{label}</button>
+        ))}
+      </div>
+
+      {erro && <div className="dados-state"><strong>Não foi possível carregar os dados.</strong><span>{erro}</span></div>}
+      {!erro && loading && <div className="dados-state"><strong>Carregando estatísticas...</strong></div>}
+
+      {!erro && !loading && aba === "coletivos" && coletivos && <>
+        <div className="dados-resumo">
+          <article><span>Jogos</span><strong>{coletivos.resumo.jogos}</strong></article>
+          <article><span>Vitórias</span><strong>{coletivos.resumo.vitorias}</strong></article>
+          <article><span>Empates</span><strong>{coletivos.resumo.empates}</strong></article>
+          <article><span>Derrotas</span><strong>{coletivos.resumo.derrotas}</strong></article>
+          <article><span>Gols marcados</span><strong>{coletivos.resumo.gols_pro}</strong></article>
+          <article><span>Gols/jogo</span><strong>{fmt(coletivos.resumo.gols_por_jogo)}</strong></article>
+          <article><span>Gols/minuto</span><strong>{fmt(coletivos.resumo.gols_por_minuto, null, 4)}</strong></article>
+          <article><span>Gols sofridos</span><strong>{coletivos.resumo.gols_contra}</strong></article>
+          <article><span>Gols sofridos/jogo</span><strong>{fmt(coletivos.resumo.gols_sofridos_por_jogo)}</strong></article>
+          <article><span>Gols sofridos/minuto</span><strong>{fmt(coletivos.resumo.gols_sofridos_por_minuto, null, 4)}</strong></article>
+          <article><span>Aproveitamento</span><strong>{coletivos.resumo.aproveitamento}%</strong></article>
+        </div>
+        <ScrollTable><table className="dados-table"><thead><tr>
+          <th><SortHeader label="Estatística" chave="nome" ordenacao={sortColetivo} onChange={setSortColetivo} /></th>
+          <th><SortHeader label="Grupo" chave="grupo" ordenacao={sortColetivo} onChange={setSortColetivo} /></th>
+          <th><SortHeader label="Por jogo" chave="media" ordenacao={sortColetivo} onChange={setSortColetivo} /></th>
+          <th><SortHeader label="Por minuto" chave="por_minuto" ordenacao={sortColetivo} onChange={setSortColetivo} /></th>
+          <th><SortHeader label="Total" chave="total" ordenacao={sortColetivo} onChange={setSortColetivo} /></th>
+        </tr></thead><tbody>
+          {coletivasFiltradas.map((m) => <tr key={m.chave}><td><strong>{m.nome}</strong></td><td>{m.grupo}</td><td>{fmt(m.media, m.unidade)}</td><td>{fmt(m.por_minuto, m.unidade, 4)}</td><td>{fmt(m.total, m.unidade)}</td></tr>)}
+        </tbody></table></ScrollTable>
+      </>}
+
+      {!erro && !loading && aba === "individual" && individual && (
+        jogadoresOrdenados.length ? <ScrollTable><table className="dados-table dados-individual"><thead><tr>
+          <th><SortHeader label="Jogador" chave="rotulo" ordenacao={sortIndividual} onChange={setSortIndividual} /></th>
+          <th><SortHeader label="Posição" chave="posicao_nome" ordenacao={sortIndividual} onChange={setSortIndividual} /></th>
+          <th><SortHeader label="Jogos" chave="jogos" ordenacao={sortIndividual} onChange={setSortIndividual} /></th>
+          <th><SortHeader label="Titular" chave="titular" ordenacao={sortIndividual} onChange={setSortIndividual} /></th>
+          <th><SortHeader label="Minutos" chave="minutos" ordenacao={sortIndividual} onChange={setSortIndividual} /></th>
+          <th><SortHeader label="Nota" chave="nota_media" ordenacao={sortIndividual} onChange={setSortIndividual} /></th>
+          <th><SortHeader label="Soma das notas" chave="soma_rating" ordenacao={sortIndividual} onChange={setSortIndividual} /></th>
+          {colunasIndividual.map((c) => <th key={c.chave}><SortHeader label={c.nome} chave={c.chave} ordenacao={sortIndividual} onChange={setSortIndividual} /></th>)}
+        </tr></thead><tbody>
+          {jogadoresOrdenados.map((j) => <tr key={j.jogador_id}>
+            <td><div className="dados-player"><img src={j.foto_url} alt="" loading="lazy" decoding="async" /><div><strong>{j.rotulo}</strong>{j.camisa != null && <span>#{j.camisa}</span>}</div></div></td>
+            <td>{j.posicao_nome}</td><td>{j.jogos}</td><td>{j.titular}</td><td>{j.minutos}</td><td>{fmt(j.nota_media)}</td><td>{fmt(j.soma_rating)}</td>
+            {colunasIndividual.map((c) => <td key={c.chave}>{fmt(j.metricas[c.chave], c.unidade, c.chave.endsWith("__por_minuto") ? 4 : 2)}</td>)}
+          </tr>)}
+        </tbody></table></ScrollTable> : <div className="dados-state"><strong>Nenhum jogador encontrado para os filtros atuais.</strong></div>
+      )}
+
+      {!erro && !loading && aba === "comparacao" && comparacaoAba === "temporadas" && compTemporadas && (
+        <ScrollTable><table className="dados-table dados-comp"><thead><tr>
+          <th><SortHeader label="Estatística" chave="nome" ordenacao={sortTemporadas} onChange={setSortTemporadas} /></th>
+          {compTemporadas.temporadas.map((t) => <th key={t}><SortHeader label={String(t)} chave={String(t)} ordenacao={sortTemporadas} onChange={setSortTemporadas} /></th>)}
+        </tr></thead><tbody>
+          {metricasTemporadas.map((m) => <tr key={m.chave}><td><strong>{m.nome}</strong></td>{compTemporadas.temporadas.map((t) => <td key={t}>{fmt(m.valores[String(t)]?.[modoComparacao], m.unidade, modoComparacao === "por_minuto" ? 4 : 2)}</td>)}</tr>)}
+        </tbody></table></ScrollTable>
+      )}
+
+      {!erro && !loading && aba === "comparacao" && comparacaoAba === "adversario" && compAdversario && <>
+        <div className="dados-status"><strong>{compAdversario.jogos}</strong><span>jogo(s) considerados · Atlético x {compAdversario.adversario_nome}</span></div>
+        <ScrollTable><table className="dados-table"><thead><tr>
+          <th><SortHeader label="Estatística" chave="nome" ordenacao={sortAdversario} onChange={setSortAdversario} /></th>
+          <th><SortHeader label="Atlético" chave="galo" ordenacao={sortAdversario} onChange={setSortAdversario} /></th>
+          <th><SortHeader label={compAdversario.adversario_nome} chave="adversario" ordenacao={sortAdversario} onChange={setSortAdversario} /></th>
+          <th><SortHeader label="Diferença" chave="diferenca" ordenacao={sortAdversario} onChange={setSortAdversario} /></th>
+        </tr></thead><tbody>
+          {metricasAdversario.map((m) => <tr key={m.chave}><td><strong>{m.nome}</strong></td><td>{fmt(m.galo[modoComparacao], m.unidade, modoComparacao === "por_minuto" ? 4 : 2)}</td><td>{fmt(m.adversario[modoComparacao], m.unidade, modoComparacao === "por_minuto" ? 4 : 2)}</td><td>{fmt(m.diferenca[modoComparacao], m.unidade, modoComparacao === "por_minuto" ? 4 : 2)}</td></tr>)}
+        </tbody></table></ScrollTable>
+      </>}
+
+      <style jsx>{`
+        .dados-root { width: 100%; }
+        .dados-header { margin: 34px 0 12px; }
+        .dados-eyebrow { margin: 0 0 7px; color: #6e7480; font-size: 10px; font-weight: 900; letter-spacing: .12em; }
+        .dados-header h2 { margin: 0; font-size: 34px; }
+        .dados-tabs, .dados-rapidos, .dados-modos { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 16px; }
+        .dados-subtabs { margin-top: -4px; }
+        .dados-tabs button, .dados-rapidos button, .dados-modos button { min-height: 40px; border: 1px solid #d8d8d8; border-radius: 999px; background: #fff; padding: 0 18px; font-weight: 800; cursor: pointer; }
+        .dados-tabs button.active, .dados-rapidos button.active, .dados-modos button.active { background: #050505; border-color: #050505; color: #fff; }
+        .dados-rapidos button, .dados-modos button { min-height: 34px; padding: 0 14px; font-size: 12px; }
+        .dados-modos { margin-top: 2px; margin-bottom: 8px; }
+        .dados-filtros { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 12px; margin: 18px 0 12px; }
+        .dados-filtros label { display: grid; gap: 6px; min-width: 0; }
+        .dados-filtros span { color: #6e7480; font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: .08em; }
+        .dados-filtros select { width: 100%; min-height: 44px; border: 1px solid #d8d8d8; border-radius: 12px; background: #fff; padding: 0 12px; }
+        .dados-status { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; margin: 8px 0 18px; color: #687081; font-size: 13px; }
+        .dados-status strong { color: #111; font-size: 18px; }
+        .dados-state { display: grid; gap: 5px; border: 1px solid #dedede; border-radius: 16px; background: #fff; padding: 18px; }
+        .dados-state span { color: #687081; }
+        .dados-resumo { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); gap: 10px; margin-bottom: 22px; }
+        .dados-resumo article { border: 1px solid #dedede; border-radius: 16px; background: #fff; padding: 16px; }
+        .dados-resumo span { display: block; color: #7b8190; font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 8px; }
+        .dados-resumo strong { font-size: 23px; }
+        .dados-scroll-top { width: 100%; overflow-x: auto; overflow-y: hidden; height: 18px; margin: 0 0 5px; border-radius: 999px; }
+        .dados-scroll-top > div { height: 1px; }
+        .dados-table-wrap { width: 100%; overflow-x: auto; border: 1px solid #dedede; border-radius: 18px; background: #fff; }
+        .dados-table { width: 100%; min-width: 900px; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+        .dados-individual { min-width: 4200px; }
+        .dados-comp { min-width: 1050px; }
+        .dados-table th, .dados-table td { padding: 13px 15px; border-bottom: 1px solid #ededed; text-align: left; white-space: nowrap; background: #fff; }
+        .dados-table th { position: sticky; top: 0; z-index: 3; background: #f7f7f6; color: #6e7480; font-size: 10px; text-transform: uppercase; letter-spacing: .07em; }
+        .dados-table tbody tr:last-child td { border-bottom: 0; }
+        .dados-sort { display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; padding: 0; color: inherit; font: inherit; font-weight: inherit; text-transform: inherit; letter-spacing: inherit; cursor: pointer; }
+        .dados-sort span { color: #9aa0aa; font-size: 12px; }
+        .dados-player { display: flex; align-items: center; gap: 10px; }
+        .dados-player img { width: 38px; height: 38px; border-radius: 50%; object-fit: cover; background: #eef0f3; }
+        .dados-player div { display: grid; gap: 2px; }
+        .dados-player span { color: #868c97; font-size: 11px; }
+        .dados-individual th:nth-child(1), .dados-individual td:nth-child(1) { position: sticky; left: 0; min-width: 235px; width: 235px; z-index: 4; box-shadow: 1px 0 0 #e4e4e4; }
+        .dados-individual th:nth-child(2), .dados-individual td:nth-child(2) { position: sticky; left: 235px; min-width: 135px; width: 135px; z-index: 4; box-shadow: 1px 0 0 #e4e4e4; }
+        .dados-individual th:nth-child(1), .dados-individual th:nth-child(2) { z-index: 6; background: #f7f7f6; }
+        .dados-individual td:nth-child(1), .dados-individual td:nth-child(2) { background: #fff; }
+        @media (max-width: 1100px) { .dados-filtros { grid-template-columns: repeat(2,minmax(0,1fr)); } .dados-resumo { grid-template-columns: repeat(4,minmax(0,1fr)); } }
+        @media (max-width: 700px) { .dados-filtros { grid-template-columns: 1fr; } .dados-resumo { grid-template-columns: repeat(2,minmax(0,1fr)); } .dados-tabs button { flex: 1 1 140px; } .dados-individual th:nth-child(1), .dados-individual td:nth-child(1) { min-width: 190px; width: 190px; } .dados-individual th:nth-child(2), .dados-individual td:nth-child(2) { left: 190px; min-width: 120px; width: 120px; } }
+      `}</style>
+    </section>
+  );
+}

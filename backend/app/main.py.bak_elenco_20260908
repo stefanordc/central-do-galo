@@ -237,10 +237,3 @@ def root() -> dict:
 from app.api.routes import jogos as jogos_routes
 app.include_router(jogos_routes.router, prefix="/api")
 
-# CENTRAL_DO_GALO_ELENCO_ROUTER
-from app.api.routes import elenco as elenco_routes
-app.include_router(elenco_routes.router, prefix="/api")
-
-# CENTRAL_DO_GALO_DADOS_ROUTER
-from app.api.routes import dados as dados_routes
-app.include_router(dados_routes.router, prefix="/api")
