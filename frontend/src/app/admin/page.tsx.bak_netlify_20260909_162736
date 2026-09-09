@@ -178,9 +178,7 @@ export default function AdminPage() {
       const posicaoA = ordem.get(a.posicao) ?? 999;
       const posicaoB = ordem.get(b.posicao) ?? 999;
       if (posicaoA !== posicaoB) return posicaoA - posicaoB;
-      const numeroA = a.numero ?? Number.MAX_SAFE_INTEGER;
-      const numeroB = b.numero ?? Number.MAX_SAFE_INTEGER;
-      if (numeroA !== numeroB) return numeroA - numeroB;
+      if (a.numero !== b.numero) return a.numero - b.numero;
       return a.nome_guerra.localeCompare(b.nome_guerra, "pt-BR");
     });
   }, [jogadores]);
