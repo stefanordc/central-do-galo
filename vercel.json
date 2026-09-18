@@ -3,12 +3,13 @@
   "services": {
     "frontend": {
       "root": "frontend/",
-      "framework": "nextjs"
+      "runtime": "container",
+      "entrypoint": "Dockerfile.vercel"
     },
     "backend": {
       "root": "backend/",
-      "framework": "fastapi",
-      "entrypoint": "app.main:app"
+      "runtime": "container",
+      "entrypoint": "Dockerfile.vercel"
     }
   },
   "rewrites": [
@@ -27,16 +28,8 @@
   ],
   "crons": [
     {
-      "path": "/api/cron/noticias",
-      "schedule": "*/5 * * * *"
-    },
-    {
-      "path": "/api/cron/youtube",
-      "schedule": "*/15 * * * *"
-    },
-    {
-      "path": "/api/cron/x",
-      "schedule": "0 * * * *"
+      "path": "/cron/dados",
+      "schedule": "0 3 * * *"
     }
   ]
 }
