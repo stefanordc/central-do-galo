@@ -272,7 +272,7 @@ type DadosIndividuais = {
   jogadores: JogadorDados[];
 };
 
-const API_URL = "/backend";
+const API_URL = "";
 const PAGE_SIZE = 60;
 const X_PAGE_SIZE = 20;
 const YOUTUBE_PAGE_SIZE = 13;
@@ -542,7 +542,7 @@ function XMediaGallery({
           key={`${imagem.url}-${index}`}
         >
           <img
-            src={`/backend/api/x/media?url=${encodeURIComponent(imagem.url)}`}
+            src={`/api/x/media?url=${encodeURIComponent(imagem.url)}`}
             alt="Imagem anexada à publicação no X"
             loading="lazy"
           />
