@@ -1406,8 +1406,15 @@ def _desativar_membros_antigos(fonte_id: UUID) -> int:
     return total
 
 
-def sincronizar_youtube() -> dict:
+def sincronizar_youtube(fonte_slug: str | None = None) -> dict:
     fontes = listar_fontes_youtube()
+
+    if fonte_slug:
+        fontes = [
+            fonte
+            for fonte in fontes
+            if str(fonte.get("slug") or "") == fonte_slug
+        ]
     total_processados = 0
     total_salvos = 0
     resultados: list[dict[str, Any]] = []
