@@ -9,6 +9,9 @@ on:
       - main
     paths:
       - ".github/workflows/atualizar-x.yml"
+      - "backend/app/services/x_remote_scrape_service.py"
+      - "backend/app/services/x_collector_store.py"
+      - "backend/scripts/sincronizar_x.py"
 
 permissions:
   contents: read
