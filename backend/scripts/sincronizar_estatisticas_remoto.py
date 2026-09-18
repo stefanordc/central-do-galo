@@ -196,6 +196,23 @@ def main() -> None:
                 estatisticas = _sofascore_get(f"/event/{event_id}/statistics")
                 lineups = _sofascore_get(f"/event/{event_id}/lineups")
 
+                if indice == 1:
+                    logger.info(
+                        "[Dados] estrutura lineups keys=%s home=%s away=%s",
+                        list(lineups.keys()) if isinstance(lineups, dict) else type(lineups).__name__,
+                        type(lineups.get("home")).__name__ if isinstance(lineups, dict) else "n/a",
+                        type(lineups.get("away")).__name__ if isinstance(lineups, dict) else "n/a",
+                    )
+                    if isinstance(lineups, dict):
+                        for chave in ("home", "away"):
+                            bloco = lineups.get(chave)
+                            if isinstance(bloco, dict):
+                                logger.info(
+                                    "[Dados] lineup %s keys=%s",
+                                    chave,
+                                    list(bloco.keys()),
+                                )
+
                 salvo = _remote_call(
                     "save_game_stats",
                     jogo_id=str(jogo["id"]),
