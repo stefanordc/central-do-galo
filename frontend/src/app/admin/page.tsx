@@ -96,6 +96,15 @@ type AcessoSerieItem = {
 type AcessoPaginaItem = {
   caminho: string;
   acessos: number;
+  clientes: number;
+  tempo_medio_segundos: number;
+};
+
+type AcessoCliqueItem = {
+  referencia: string;
+  referencia_slug: string | null;
+  cliques: number;
+  clientes: number;
 };
 
 type AcessosResumo = {
@@ -107,6 +116,8 @@ type AcessosResumo = {
   paginas_distintas: number;
   serie: AcessoSerieItem[];
   paginas: AcessoPaginaItem[];
+  fontes: AcessoCliqueItem[];
+  youtube: AcessoCliqueItem[];
 };
 
 const ACESSOS_VAZIO: AcessosResumo = {
@@ -118,6 +129,8 @@ const ACESSOS_VAZIO: AcessosResumo = {
   paginas_distintas: 0,
   serie: [],
   paginas: [],
+  fontes: [],
+  youtube: [],
 };
 
 function slugify(valor: string): string {
@@ -185,6 +198,19 @@ function nomePaginaAcesso(caminho: string): string {
   };
 
   return nomes[caminho] ?? caminho;
+}
+
+function formatarDuracaoAcesso(segundos: number): string {
+  const total = Math.max(0, Math.round(Number(segundos) || 0));
+  const horas = Math.floor(total / 3600);
+  const minutos = Math.floor((total % 3600) / 60);
+  const resto = total % 60;
+
+  return [
+    String(horas).padStart(2, "0"),
+    String(minutos).padStart(2, "0"),
+    String(resto).padStart(2, "0"),
+  ].join(":");
 }
 
 export default function AdminPage() {
@@ -386,6 +412,8 @@ export default function AdminPage() {
         paginas_distintas: Number(body.paginas_distintas ?? 0),
         serie: Array.isArray(body.serie) ? body.serie : [],
         paginas: Array.isArray(body.paginas) ? body.paginas : [],
+        fontes: Array.isArray(body.fontes) ? body.fontes : [],
+        youtube: Array.isArray(body.youtube) ? body.youtube : [],
       });
     } catch (error) {
       setMensagem(
@@ -982,27 +1010,97 @@ export default function AdminPage() {
             <div className="admin-access-chart-heading">
               <div>
                 <span className="eyebrow">PÁGINAS</span>
-                <h3>Mais acessadas</h3>
+                <h3>Acessos, clientes e permanência</h3>
               </div>
             </div>
 
             {acessosResumo.paginas.length > 0 ? (
-              <div className="admin-list">
-                {acessosResumo.paginas.map((pagina) => (
-                  <div className="admin-list-item" key={pagina.caminho}>
-                    <div>
-                      <strong>{nomePaginaAcesso(pagina.caminho)}</strong>
-                      <span>{pagina.caminho}</span>
-                    </div>
-                    <strong>{pagina.acessos.toLocaleString("pt-BR")}</strong>
-                  </div>
-                ))}
+              <div className="admin-access-table-wrap">
+                <table className="admin-access-table">
+                  <thead>
+                    <tr>
+                      <th>Página</th>
+                      <th>Acessos</th>
+                      <th>Clientes</th>
+                      <th>Tempo médio</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {acessosResumo.paginas.map((pagina) => (
+                      <tr key={pagina.caminho}>
+                        <td>
+                          <strong>{nomePaginaAcesso(pagina.caminho)}</strong>
+                          <span>{pagina.caminho}</span>
+                        </td>
+                        <td>{Number(pagina.acessos ?? 0).toLocaleString("pt-BR")}</td>
+                        <td>{Number(pagina.clientes ?? 0).toLocaleString("pt-BR")}</td>
+                        <td>{formatarDuracaoAcesso(pagina.tempo_medio_segundos)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             ) : (
               <div className="admin-access-empty">
                 Nenhuma página acessada nesse período.
               </div>
             )}
+          </div>
+
+          <div className="admin-access-sources-grid">
+            <div className="admin-access-pages">
+              <div className="admin-access-chart-heading">
+                <div>
+                  <span className="eyebrow">NOTÍCIAS</span>
+                  <h3>Fontes mais acessadas</h3>
+                </div>
+              </div>
+
+              {acessosResumo.fontes.length > 0 ? (
+                <div className="admin-list">
+                  {acessosResumo.fontes.map((item) => (
+                    <div className="admin-list-item" key={item.referencia}>
+                      <div>
+                        <strong>{item.referencia}</strong>
+                        <span>{item.clientes.toLocaleString("pt-BR")} cliente(s)</span>
+                      </div>
+                      <strong>{item.cliques.toLocaleString("pt-BR")} clique(s)</strong>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="admin-access-empty">
+                  Nenhum clique em “Ler na fonte” nesse período.
+                </div>
+              )}
+            </div>
+
+            <div className="admin-access-pages">
+              <div className="admin-access-chart-heading">
+                <div>
+                  <span className="eyebrow">YOUTUBE</span>
+                  <h3>Canais mais acessados</h3>
+                </div>
+              </div>
+
+              {acessosResumo.youtube.length > 0 ? (
+                <div className="admin-list">
+                  {acessosResumo.youtube.map((item) => (
+                    <div className="admin-list-item" key={item.referencia}>
+                      <div>
+                        <strong>{item.referencia}</strong>
+                        <span>{item.clientes.toLocaleString("pt-BR")} cliente(s)</span>
+                      </div>
+                      <strong>{item.cliques.toLocaleString("pt-BR")} reprodução(ões)</strong>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="admin-access-empty">
+                  Nenhuma reprodução do YouTube nesse período.
+                </div>
+              )}
+            </div>
           </div>
         </article>
 
@@ -1717,6 +1815,59 @@ export default function AdminPage() {
           border-radius: 12px;
           color: #6b7280;
           text-align: center;
+        }
+
+        .admin-access-table-wrap {
+          overflow-x: auto;
+          border: 1px solid #e5e7eb;
+          border-radius: 14px;
+        }
+
+        .admin-access-table {
+          width: 100%;
+          min-width: 620px;
+          border-collapse: collapse;
+        }
+
+        .admin-access-table th,
+        .admin-access-table td {
+          padding: 12px 14px;
+          text-align: left;
+          border-bottom: 1px solid #eceff3;
+        }
+
+        .admin-access-table th {
+          color: #6b7280;
+          font-size: 11px;
+          letter-spacing: 0.05em;
+          text-transform: uppercase;
+        }
+
+        .admin-access-table td:first-child strong,
+        .admin-access-table td:first-child span {
+          display: block;
+        }
+
+        .admin-access-table td:first-child span {
+          margin-top: 3px;
+          color: #9ca3af;
+          font-size: 12px;
+        }
+
+        .admin-access-table tbody tr:last-child td {
+          border-bottom: 0;
+        }
+
+        .admin-access-sources-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 18px;
+        }
+
+        @media (max-width: 900px) {
+          .admin-access-sources-grid {
+            grid-template-columns: 1fr;
+          }
         }
 
         @media (max-width: 720px) {
