@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { publicApiFetch } from "../lib/publicApi";
 
 type Categoria = "todos" | "geral" | "ataque" | "defesa";
 type Aba = "coletivos" | "individual" | "comparacao";
@@ -249,24 +250,24 @@ export default function DadosSection() {
         const base = new URLSearchParams({ temporada: String(temporada) });
         if (campeonato) base.set("campeonato", campeonato);
 
-        const filtrosPromise = fetch(`${API_URL}/api/dados/filtros?${base}`, { cache: "no-store" });
+        const filtrosPromise = publicApiFetch(`/api/dados/filtros?${base}`, { cache: "no-store" });
 
         let dadosPromise: Promise<Response>;
         if (aba === "coletivos") {
-          dadosPromise = fetch(`${API_URL}/api/dados/coletivos?${base}`, { cache: "no-store" });
+          dadosPromise = publicApiFetch(`/api/dados/coletivos?${base}`, { cache: "no-store" });
         } else if (aba === "individual") {
           const q = new URLSearchParams(base);
           if (jogadorId) q.set("jogador_id", jogadorId);
           if (posicao) q.set("posicao", posicao);
-          dadosPromise = fetch(`${API_URL}/api/dados/individual?${q}`, { cache: "no-store" });
+          dadosPromise = publicApiFetch(`/api/dados/individual?${q}`, { cache: "no-store" });
         } else if (comparacaoAba === "temporadas") {
           const q = new URLSearchParams();
           if (campeonato) q.set("campeonato", campeonato);
-          dadosPromise = fetch(`${API_URL}/api/dados/comparacao/temporadas?${q}`, { cache: "no-store" });
+          dadosPromise = publicApiFetch(`/api/dados/comparacao/temporadas?${q}`, { cache: "no-store" });
         } else {
           const q = new URLSearchParams(base);
           if (adversarioId) q.set("adversario_id", adversarioId);
-          dadosPromise = fetch(`${API_URL}/api/dados/comparacao/adversario?${q}`, { cache: "no-store" });
+          dadosPromise = publicApiFetch(`/api/dados/comparacao/adversario?${q}`, { cache: "no-store" });
         }
 
         const [filtrosResponse, dadosResponse] = await Promise.all([filtrosPromise, dadosPromise]);
