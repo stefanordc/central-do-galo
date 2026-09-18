@@ -221,16 +221,43 @@ export default function AdminPage() {
       return;
     }
 
-    if (paginasResponse.ok) setPaginas(await paginasResponse.json());
-    if (contasResponse.ok) setContas(await contasResponse.json());
-    if (canaisYoutubeResponse.ok) setCanaisYoutube(await canaisYoutubeResponse.json());
-    if (elencoResponse.ok) setJogadores(await elencoResponse.json());
+    const falhas: string[] = [];
+
+    if (paginasResponse.ok) {
+      setPaginas(await paginasResponse.json());
+    } else {
+      falhas.push(`Páginas (HTTP ${paginasResponse.status})`);
+    }
+
+    if (contasResponse.ok) {
+      setContas(await contasResponse.json());
+    } else {
+      falhas.push(`X (HTTP ${contasResponse.status})`);
+    }
+
+    if (canaisYoutubeResponse.ok) {
+      setCanaisYoutube(await canaisYoutubeResponse.json());
+    } else {
+      falhas.push(`YouTube (HTTP ${canaisYoutubeResponse.status})`);
+    }
+
+    if (elencoResponse.ok) {
+      setJogadores(await elencoResponse.json());
+    } else {
+      falhas.push(`Elenco (HTTP ${elencoResponse.status})`);
+    }
 
     if (capaResponse.ok) {
       const capa: CapaSiteConfig = await capaResponse.json();
       setCapaAtiva(capa.ativo);
       setCapaTipo(capa.tipo);
       setCapaMediaUrl(capa.media_url ?? "");
+    } else {
+      falhas.push(`Capa (HTTP ${capaResponse.status})`);
+    }
+
+    if (falhas.length) {
+      setMensagem(`Não foi possível carregar: ${falhas.join(", ")}.`);
     }
   }
 
