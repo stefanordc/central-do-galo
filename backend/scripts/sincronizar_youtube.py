@@ -1,3 +1,4 @@
+import argparse
 import logging
 import os
 from pathlib import Path
@@ -18,6 +19,10 @@ logging.basicConfig(
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="Sincronização de vídeos do YouTube")
+    parser.add_argument("--fonte", help="Slug de um canal específico do YouTube")
+    args = parser.parse_args()
+
     print("=== CENTRAL DO GALO | YOUTUBE ===")
     print("Fonte: youtube.com via SeleniumBase UC | filtro: Público | sem login")
     usar_store_remoto = bool((os.getenv("YOUTUBE_REMOTE_STORE_URL") or "").strip())
@@ -26,7 +31,7 @@ def main() -> int:
         open_pool()
 
     try:
-        resultado = sincronizar_youtube()
+        resultado = sincronizar_youtube(fonte_slug=args.fonte)
     finally:
         if not usar_store_remoto:
             close_pool()
