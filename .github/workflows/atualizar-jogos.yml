@@ -12,6 +12,7 @@ on:
       - "backend/scripts/sincronizar_jogos_remoto.py"
       - "backend/app/services/jogos_collector_store.py"
       - "backend/app/services/jogo_service.py"
+      - "backend/requirements.txt"
 
 permissions:
   contents: read
