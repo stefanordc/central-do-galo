@@ -1,0 +1,15 @@
+name: Testar API publica Central do Galo
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/testar-api-publica.yml"
+
+jobs:
+  teste:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Testar Edge Function
+        run: curl -sS -f "https://lhrpsquyzehevxuogxar.supabase.co/functions/v1/central-api-smoke"
