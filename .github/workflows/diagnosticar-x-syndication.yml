@@ -1,0 +1,16 @@
+name: Diagnosticar syndication X
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/diagnosticar-x-syndication.yml"
+
+jobs:
+  teste:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Testar saída do Supabase para syndication
+        run: |
+          curl -sS https://lhrpsquyzehevxuogxar.supabase.co/functions/v1/x-syndication-test
