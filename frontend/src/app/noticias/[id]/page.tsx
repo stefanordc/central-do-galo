@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import { publicApiFetch } from "../../../lib/publicApi";
 
 type CategoriaResumo = {
   nome: string;
@@ -26,7 +27,6 @@ type Noticia = {
   fonte_confiabilidade: number;
 };
 
-const API_URL = "";
 const FALLBACK_IMAGE = "/central-do-galo-logo.png";
 
 function formatarData(data: string | null, coletadoEm: string): string {
@@ -51,7 +51,7 @@ export default function NoticiaPage() {
     const id = params?.id;
     if (!id) return;
 
-    fetch(`${API_URL}/api/noticias/${encodeURIComponent(id)}`, { cache: "no-store" })
+    publicApiFetch(`/api/noticias/${encodeURIComponent(id)}`, { cache: "no-store" })
       .then(async (response) => {
         const body = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(body.detail ?? `API respondeu ${response.status}`);
