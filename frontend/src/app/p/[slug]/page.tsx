@@ -3,7 +3,7 @@
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
-const API_URL = "/backend";
+const API_URL = "";
 
 type Pagina = {
   id: string;
