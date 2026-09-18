@@ -187,7 +187,7 @@ function sofaEventId(game: JsonObject): number | null {
   return null;
 }
 
-function sofaPlayers(lineups: JsonObject, lado: "home" | "away") {
+function sofaPlayers(lineups: JsonObject, lado: "home" | "away"): JsonObject[] {
   const players = Array.isArray(lineups?.[lado]?.players) ? lineups[lado].players : [];
   return players
     .map((item: JsonObject) => {
@@ -204,7 +204,7 @@ function sofaPlayers(lineups: JsonObject, lado: "home" | "away") {
         estatisticas: item?.statistics ?? {},
       };
     })
-    .filter(Boolean);
+    .filter((item): item is JsonObject => item !== null);
 }
 
 function statMap(teamBlock: JsonObject): Map<string, unknown> {
@@ -277,7 +277,7 @@ function apiFootballCollective(statsResponse: JsonObject[], fixture: JsonObject)
   };
 }
 
-function apiFootballPlayers(playersResponse: JsonObject[], fixture: JsonObject) {
+function apiFootballPlayers(playersResponse: JsonObject[], fixture: JsonObject): JsonObject[] {
   const galo = playersResponse.find((x) => Number(x?.team?.id) === TEAM_ID);
   const players = Array.isArray(galo?.players) ? galo.players : [];
 
@@ -354,7 +354,7 @@ function apiFootballPlayers(playersResponse: JsonObject[], fixture: JsonObject) 
         estatisticas,
       };
     })
-    .filter(Boolean);
+    .filter((item): item is JsonObject => item !== null);
 }
 
 async function saveStats(
