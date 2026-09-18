@@ -1935,6 +1935,22 @@ button {
   box-shadow: 0 20px 55px rgba(0, 0, 0, 0.18);
 }
 
+.youtube-player-shell.global-youtube-player {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  z-index: 2000;
+  width: min(760px, calc(100vw - 44px));
+  margin: 0;
+  border-color: #3a3a3a;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.4);
+  transition:
+    width 180ms ease,
+    right 180ms ease,
+    bottom 180ms ease,
+    border-radius 180ms ease;
+}
+
 .youtube-player-shell.mini {
   position: fixed;
   right: 22px;
@@ -2053,6 +2069,12 @@ button {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
+  .youtube-player-shell.global-youtube-player {
+    right: 10px;
+    bottom: 10px;
+    width: min(680px, calc(100vw - 20px));
+  }
+
   .youtube-player-shell.mini {
     right: 10px;
     bottom: 10px;
@@ -2078,9 +2100,10 @@ button {
     border-radius: 12px;
   }
 
+  .youtube-player-shell.global-youtube-player,
   .youtube-player-shell.mini {
     right: 8px;
-    bottom: 8px;
+    bottom: calc(8px + env(safe-area-inset-bottom));
     width: calc(100vw - 16px);
   }
 }
