@@ -16,13 +16,30 @@ permissions:
 
 concurrency:
   group: atualizar-videos-youtube
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   sincronizar:
-    name: Sincronizar YouTube
+    name: YouTube - ${{ matrix.fonte }}
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 25
+
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        fonte:
+          - youtube-atletico
+          - youtube-atleticoreactnews
+          - youtube-canalbicagalo
+          - youtube-canalcamisadoze
+          - youtube-canaldofrossard
+          - youtube-cazetv
+          - youtube-espnbrasil
+          - youtube-falagalo13
+          - youtube-getv
+          - youtube-lucastanaka13
+          - youtube-webradiogalo
 
     defaults:
       run:
@@ -62,5 +79,5 @@ jobs:
         run: |
           google-chrome --version || chromium --version || true
 
-      - name: Sincronizar canais do YouTube
-        run: python scripts/sincronizar_youtube.py
+      - name: Sincronizar canal
+        run: python scripts/sincronizar_youtube.py --fonte "${{ matrix.fonte }}"
