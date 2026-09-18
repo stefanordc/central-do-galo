@@ -13,3 +13,8 @@ export function publicApiFetch(path: string, init: RequestInit = {}) {
     headers,
   });
 }
+
+
+export function xMediaUrl(url: string) {
+  return `https://lhrpsquyzehevxuogxar.supabase.co/functions/v1/x-media?url=${encodeURIComponent(url)}`;
+}
