@@ -2,7 +2,7 @@
 
 import { ClipboardEvent, FormEvent, useEffect, useMemo, useState } from "react";
 
-const API_URL = "/backend";
+const API_URL = "";
 const ADMIN_EMAIL = "stefanobrunofaria@gmail.com";
 
 type PaginaAdmin = {
