@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
@@ -7,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes.admin import router as admin_router
 from app.api.routes.categories import router as categories_router
+from app.api.routes.cron import router as cron_router
 from app.api.routes.health import router as health_router
 from app.api.routes.news import router as news_router
 from app.api.routes.pages import router as pages_router
@@ -145,12 +147,14 @@ async def x_sync_loop() -> None:
 async def lifespan(_: FastAPI):
     open_pool()
 
+    is_vercel = os.getenv("VERCEL") == "1"
+
     collector_task: asyncio.Task | None = None
-    if settings.news_collection_enabled:
+    if settings.news_collection_enabled and not is_vercel:
         collector_task = asyncio.create_task(news_collector_loop())
 
     youtube_task: asyncio.Task | None = None
-    if settings.youtube_sync_enabled:
+    if settings.youtube_sync_enabled and not is_vercel:
         logger.info(
             "[YouTube] job automático habilitado | intervalo=%ss | itens por seção=%s",
             settings.youtube_sync_interval_seconds,
@@ -159,7 +163,7 @@ async def lifespan(_: FastAPI):
         youtube_task = asyncio.create_task(youtube_sync_loop())
 
     x_task: asyncio.Task | None = None
-    if settings.x_sync_enabled:
+    if settings.x_sync_enabled and not is_vercel:
         if _x_source() == "x_api_v2" and not (settings.x_bearer_token or "").strip():
             logger.error(
                 "[Radar do X] X_SOURCE=x_api_v2, mas X_BEARER_TOKEN não está configurado. "
@@ -194,7 +198,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "https://centraldogalo.vercel.app"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -204,6 +208,7 @@ app.include_router(health_router, prefix="/api")
 app.include_router(admin_router, prefix="/api")
 app.include_router(pages_router, prefix="/api")
 app.include_router(categories_router, prefix="/api")
+app.include_router(cron_router, prefix="/api")
 app.include_router(news_router, prefix="/api")
 app.include_router(sources_router, prefix="/api")
 app.include_router(x_router, prefix="/api")
