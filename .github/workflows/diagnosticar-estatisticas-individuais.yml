@@ -1,0 +1,58 @@
+name: Diagnosticar endpoint de jogadores
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/diagnosticar-estatisticas-individuais.yml"
+
+jobs:
+  diagnostico:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Consultar SofaScore
+        run: |
+          python - <<'PY'
+          import json
+          from app.services.jogo_service import _cliente_sofascore, fechar_cliente_sofascore
+
+          fields = [
+              "goals","yellowCards","redCards","groundDuelsWon",
+              "aerialDuelsWon","successfulDribbles","tackles","assists",
+              "accuratePasses","keyPasses","accurateCrosses","accurateLongBalls",
+              "interceptions","clearances","dribbledPast","bigChancesMissed",
+              "totalShots","shotsOnTarget","blockedShots","hitWoodwork","offsides",
+              "expectedGoals","minutesPlayed","appearances","started","saves",
+              "rating"
+          ]
+          path = (
+              "https://www.sofascore.com/api/v1/unique-tournament/325/season/87678/statistics"
+              "?limit=100&order=-rating&offset=0&accumulation=total"
+              "&fields=" + "%2C".join(fields)
+              + "&filters=position.in.G~D~M~F"
+          )
+          try:
+              data = _cliente_sofascore().get_json(path)
+              print("KEYS", list(data.keys()))
+              print("PAGE", data.get("page"), "PAGES", data.get("pages"))
+              rows = data.get("results") or []
+              galo = [r for r in rows if (r.get("team") or {}).get("id") == 1977]
+              print("GALO_COUNT", len(galo))
+              for r in galo[:10]:
+                  print(json.dumps(r, ensure_ascii=False)[:4000])
+          finally:
+              fechar_cliente_sofascore()
+          PY
