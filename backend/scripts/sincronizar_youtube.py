@@ -1,4 +1,5 @@
 import logging
+import os
 from pathlib import Path
 import sys
 
@@ -19,11 +20,16 @@ logging.basicConfig(
 def main() -> int:
     print("=== CENTRAL DO GALO | YOUTUBE ===")
     print("Fonte: youtube.com via SeleniumBase UC | filtro: Público | sem login")
-    open_pool()
+    usar_store_remoto = bool((os.getenv("YOUTUBE_REMOTE_STORE_URL") or "").strip())
+
+    if not usar_store_remoto:
+        open_pool()
+
     try:
         resultado = sincronizar_youtube()
     finally:
-        close_pool()
+        if not usar_store_remoto:
+            close_pool()
 
     print(
         f"fontes={resultado['fontes']} | processados={resultado['processados']} | "
