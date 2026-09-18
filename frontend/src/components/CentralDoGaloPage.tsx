@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import DadosSection from "./DadosSection";
 import { publicApiFetch, xMediaUrl } from "../lib/publicApi";
+import { registrarCliqueAnalytics } from "../lib/analytics";
 
 type CategoriaResumo = {
   nome: string;
@@ -1161,6 +1162,15 @@ export default function CentralDoGaloPage({
   }
 
   function reproduzirVideo(video: VideoYoutube) {
+    void registrarCliqueAnalytics({
+      tipo: "youtube",
+      referencia: video.fonte_nome,
+      referencia_slug: video.fonte_slug,
+      item_id: video.id,
+      caminho: window.location.pathname,
+      destino_url: video.url,
+    }).catch(() => undefined);
+
     setVideoAtivo(video);
     window.requestAnimationFrame(() => {
       document.getElementById("youtube-player")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1762,7 +1772,21 @@ export default function CentralDoGaloPage({
 
                 <div className="news-footer">
                   <time>{formatarData(noticia.publicado_em, noticia.coletado_em)}</time>
-                  <a href={noticia.url} target="_blank" rel="noopener noreferrer">
+                  <a
+                    href={noticia.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={() => {
+                      void registrarCliqueAnalytics({
+                        tipo: "noticia",
+                        referencia: noticia.fonte_nome,
+                        referencia_slug: noticia.fonte_slug,
+                        item_id: noticia.id,
+                        caminho: window.location.pathname,
+                        destino_url: noticia.url,
+                      }).catch(() => undefined);
+                    }}
+                  >
                     Ler na fonte →
                   </a>
                 </div>
