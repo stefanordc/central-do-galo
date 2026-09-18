@@ -17,7 +17,7 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app.services.data_collector_store import remote_call
-from app.services.jogo_service import _sofascore_get, fechar_cliente_sofascore
+from app.services.jogo_service import _cliente_sofascore, _sofascore_get, fechar_cliente_sofascore
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,52 +28,86 @@ logger = logging.getLogger("central_galo.dados.remote")
 
 def _fetch_widget_lineups(event_id: int, tentativas: int = 3) -> dict:
     url = f"https://widgets.sofascore.com/embed/lineups?id={event_id}"
-    user_agents = [
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    ]
+    cliente = _cliente_sofascore()
+    ultimo_erro: Exception | None = None
 
     for tentativa in range(1, tentativas + 1):
-        req = urllib.request.Request(
-            url,
-            headers={
-                "User-Agent": random.choice(user_agents),
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
-                "Accept-Encoding": "identity",
-                "Referer": "https://www.sofascore.com/",
-            },
-        )
         try:
-            with urllib.request.urlopen(req, timeout=25) as response:
-                html = response.read().decode("utf-8", errors="replace")
-
-            match = re.search(
-                r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>',
-                html,
-                re.DOTALL,
+            logger.info(
+                "[Dados] abrindo widget no Chrome event=%s tentativa=%s/%s",
+                event_id,
+                tentativa,
+                tentativas,
             )
-            if not match:
-                raise RuntimeError("Widget sem __NEXT_DATA__.")
+            cliente.driver.get(url)
+            time.sleep(1.5)
 
-            data = json.loads(match.group(1))
+            # O widget é uma página Next.js. O payload das escalações fica no
+            # script __NEXT_DATA__, mesmo quando a UI ainda está renderizando.
+            script_text = cliente.driver.execute_script(
+                """
+                const el = document.getElementById('__NEXT_DATA__');
+                return el ? el.textContent : '';
+                """
+            )
+
+            if not script_text:
+                page_source = cliente.driver.page_source or ""
+                match = re.search(
+                    r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>',
+                    page_source,
+                    re.DOTALL,
+                )
+                script_text = match.group(1) if match else ""
+
+            if not script_text:
+                body_text = cliente.driver.execute_script(
+                    "return document.body ? document.body.innerText : '';"
+                )
+                raise RuntimeError(
+                    "Widget sem __NEXT_DATA__. "
+                    f"Body inicial={str(body_text)[:180]!r}"
+                )
+
+            data = json.loads(script_text)
             page_props = data.get("props", {}).get("pageProps", {})
             lineups = page_props.get("initialLineups") or {}
 
-            if isinstance(lineups, dict) and ("home" in lineups or "away" in lineups):
+            if isinstance(lineups, dict) and (
+                isinstance(lineups.get("home"), dict)
+                or isinstance(lineups.get("away"), dict)
+            ):
+                # Volta à origem principal para preservar o fluxo usado pelo
+                # cliente híbrido na próxima chamada ao SofaScore.
+                cliente.driver.get("https://www.sofascore.com/")
+                time.sleep(0.4)
+                cliente.renovar_sessao()
                 return lineups
 
-            raise RuntimeError("Widget sem initialLineups.")
+            raise RuntimeError(
+                f"Widget sem initialLineups. pageProps={list(page_props.keys())}"
+            )
         except Exception as exc:
-            if tentativa >= tentativas:
-                raise RuntimeError(
-                    f"Falha no widget de lineups do evento {event_id}: {exc}"
-                ) from exc
-            time.sleep(1.5 * tentativa + random.uniform(0.2, 0.8))
+            ultimo_erro = exc
+            logger.warning(
+                "[Dados] widget via Chrome falhou event=%s tentativa=%s: %s",
+                event_id,
+                tentativa,
+                str(exc).splitlines()[0],
+            )
+            try:
+                cliente.driver.get("https://www.sofascore.com/")
+                time.sleep(0.8)
+                cliente.renovar_sessao()
+            except Exception:
+                pass
 
-    return {}
+            if tentativa < tentativas:
+                time.sleep(1.2 * tentativa + random.uniform(0.2, 0.8))
 
+    raise RuntimeError(
+        f"Falha no widget de lineups do evento {event_id}: {ultimo_erro}"
+    )
 
 
 def main() -> None:
