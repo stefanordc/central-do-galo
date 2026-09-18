@@ -29,17 +29,17 @@ jobs:
       max-parallel: 11
       matrix:
         fonte:
+          - youtube-getv
+          - youtube-cazetv
+          - youtube-espnbrasil
+          - youtube-falagalo13
+          - youtube-lucastanaka13
+          - youtube-webradiogalo
           - youtube-atletico
           - youtube-atleticoreactnews
           - youtube-canalbicagalo
           - youtube-canalcamisadoze
           - youtube-canaldofrossard
-          - youtube-cazetv
-          - youtube-espnbrasil
-          - youtube-falagalo13
-          - youtube-getv
-          - youtube-lucastanaka13
-          - youtube-webradiogalo
 
     defaults:
       run:
@@ -56,7 +56,7 @@ jobs:
       YOUTUBE_SCRAPE_PAGE_TIMEOUT_SECONDS: "45"
       YOUTUBE_SCRAPE_WAIT_SECONDS: "20"
       YOUTUBE_SCRAPE_SCROLL_PAUSE_SECONDS: "1.5"
-      YOUTUBE_SCRAPE_MAX_SCROLLS: "6"
+      YOUTUBE_SCRAPE_MAX_SCROLLS: "35"
       YOUTUBE_SCRAPE_DEBUG_ENABLED: "false"
 
     steps:
