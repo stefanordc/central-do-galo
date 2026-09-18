@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import DadosSection from "./DadosSection";
+import { publicApiFetch } from "../lib/publicApi";
 
 type CategoriaResumo = {
   nome: string;
@@ -1006,8 +1007,8 @@ export default function CentralDoGaloPage({
   async function carregarFiltros() {
     try {
       const [categoriasResponse, fontesResponse] = await Promise.all([
-        fetch(`${API_URL}/api/categorias`, { cache: "no-store" }),
-        fetch(`${API_URL}/api/fontes`, { cache: "no-store" }),
+        publicApiFetch("/api/categorias", { cache: "no-store" }),
+        publicApiFetch("/api/fontes", { cache: "no-store" }),
       ]);
 
       if (categoriasResponse.ok) {
@@ -1035,7 +1036,7 @@ export default function CentralDoGaloPage({
 
   async function carregarPerfisX() {
     try {
-      const response = await fetch(`${API_URL}/api/x/contas`, { cache: "no-store" });
+      const response = await publicApiFetch("/api/x/contas", { cache: "no-store" });
       if (!response.ok) return;
       const data: ContaXFiltro[] = await response.json();
       setPerfisX(
@@ -1187,7 +1188,7 @@ export default function CentralDoGaloPage({
     try {
       const offset = append ? noticias.length : 0;
       const params = montarParametros(offset);
-      const response = await fetch(`${API_URL}/api/noticias?${params.toString()}`, {
+      const response = await publicApiFetch(`/api/noticias?${params.toString()}`, {
         cache: "no-store",
       });
 
@@ -1331,7 +1332,7 @@ export default function CentralDoGaloPage({
   useEffect(() => {
     let ativo = true;
 
-    fetch(`${API_URL}/api/admin/capa-publica`, { cache: "no-store" })
+    publicApiFetch("/api/admin/capa-publica", { cache: "no-store" })
       .then(async (response) => {
         if (!response.ok) return null;
         return response.json() as Promise<CapaSiteConfig>;
