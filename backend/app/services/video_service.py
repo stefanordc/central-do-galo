@@ -1481,9 +1481,11 @@ def sincronizar_youtube(fonte_slug: str | None = None) -> dict:
 
                 limite_coleta = max(settings.youtube_items_per_section, 13)
                 if filtro_termos or filtro_excluir_termos:
-                    # Canais generalistas precisam de uma varredura maior para
-                    # encontrarmos publicações específicas do Atlético.
-                    limite_coleta = max(settings.youtube_items_per_section * 6, 60)
+                    # Canais generalistas publicam dezenas de itens por dia.
+                    # A filtragem por Atlético ocorre depois da leitura da grade,
+                    # então precisamos percorrer uma janela ampla para não perder
+                    # vídeos recentes do Galo que estejam abaixo dos primeiros cards.
+                    limite_coleta = max(settings.youtube_items_per_section * 25, 300)
 
                 try:
                     items = scraper.coletar_aba(
