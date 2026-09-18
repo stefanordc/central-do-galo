@@ -26,7 +26,7 @@ type Noticia = {
   fonte_confiabilidade: number;
 };
 
-const API_URL = "/backend";
+const API_URL = "";
 const FALLBACK_IMAGE = "/central-do-galo-logo.png";
 
 function formatarData(data: string | null, coletadoEm: string): string {
