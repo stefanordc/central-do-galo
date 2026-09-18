@@ -11,14 +11,6 @@ jobs:
   teste:
     runs-on: ubuntu-latest
     steps:
-      - name: Testar RSS alternativos
+      - name: Inspecionar primeiro item RSS
         run: |
-          set +e
-          for url in             "https://occupy-x.com/Atletico/rss"             "https://nitter.kareem.one/Atletico/rss"             "https://nitter.meowing.monster/Atletico/rss"             "https://x.n0g.xyz/Atletico/rss"
-          do
-            echo "============================================================"
-            echo "$url"
-            curl -L -A "Mozilla/5.0" --max-time 20 -sS -o /tmp/feed.txt -w "HTTP=%{http_code} FINAL=%{url_effective}\n" "$url"
-            head -c 500 /tmp/feed.txt
-            echo
-          done
+          curl -L -A "Mozilla/5.0" --max-time 20 -sS             "https://x.n0g.xyz/Atletico/rss"             | awk '/<item>/{flag=1} flag{print} /<\/item>/{exit}'
