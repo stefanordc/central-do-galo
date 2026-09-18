@@ -1,0 +1,66 @@
+name: Atualizar videos do YouTube
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/atualizar-videos.yml"
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: atualizar-videos-youtube
+  cancel-in-progress: false
+
+jobs:
+  sincronizar:
+    name: Sincronizar YouTube
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    defaults:
+      run:
+        working-directory: backend
+
+    env:
+      APP_ENV: production
+      YOUTUBE_REMOTE_STORE_URL: https://lhrpsquyzehevxuogxar.supabase.co/functions/v1/video-collector-store
+      YOUTUBE_SYNC_ENABLED: "true"
+      YOUTUBE_SYNC_INTERVAL_SECONDS: "900"
+      YOUTUBE_SYNC_INITIAL_DELAY_SECONDS: "0"
+      YOUTUBE_ITEMS_PER_SECTION: "13"
+      YOUTUBE_SCRAPE_HEADLESS: "true"
+      YOUTUBE_SCRAPE_PAGE_TIMEOUT_SECONDS: "45"
+      YOUTUBE_SCRAPE_WAIT_SECONDS: "20"
+      YOUTUBE_SCRAPE_SCROLL_PAUSE_SECONDS: "1.5"
+      YOUTUBE_SCRAPE_MAX_SCROLLS: "6"
+      YOUTUBE_SCRAPE_DEBUG_ENABLED: "false"
+
+    steps:
+      - name: Baixar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Verificar Chrome
+        run: |
+          google-chrome --version || chromium --version || true
+
+      - name: Sincronizar canais do YouTube
+        run: python scripts/sincronizar_youtube.py
