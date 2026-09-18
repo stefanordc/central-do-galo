@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import DadosSection from "./DadosSection";
 import { publicApiFetch, xMediaUrl } from "../lib/publicApi";
 import { registrarCliqueAnalytics } from "../lib/analytics";
+import { useYoutubePlayer } from "./YoutubePlayerProvider";
 
 type CategoriaResumo = {
   nome: string;
@@ -797,55 +798,6 @@ function VideoShelf({
   );
 }
 
-function YoutubePersistentPlayer({
-  video,
-  mini,
-  onClose,
-  onReturn,
-}: {
-  video: VideoYoutube | null;
-  mini: boolean;
-  onClose: () => void;
-  onReturn: () => void;
-}) {
-  if (!video) return null;
-
-  return (
-    <section
-      id="youtube-player"
-      className={mini ? "youtube-player-shell mini" : "youtube-player-shell"}
-      aria-label="Player de vídeo"
-    >
-      <div className="youtube-player-topbar">
-        <div>
-          <span>{mini ? "Reproduzindo" : video.fonte_nome}</span>
-          <strong>{video.titulo}</strong>
-        </div>
-        <div className="youtube-player-actions">
-          {mini && (
-            <button type="button" onClick={onReturn} title="Voltar para Vídeos">
-              ↗
-            </button>
-          )}
-          <button type="button" onClick={onClose} title="Fechar vídeo" aria-label="Fechar vídeo">
-            ×
-          </button>
-        </div>
-      </div>
-      <div className="youtube-player-frame">
-        <iframe
-          key={video.video_id}
-          src={`${typeof video.metadados.embed_url === "string" ? video.metadados.embed_url : `https://www.youtube.com/embed/${video.video_id}`}?autoplay=1&playsinline=1&rel=0`}
-          title={video.titulo}
-          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-          referrerPolicy="strict-origin-when-cross-origin"
-          allowFullScreen
-        />
-      </div>
-    </section>
-  );
-}
-
 function normalizarBusca(valor: string): string {
   return valor
     .normalize("NFD")
@@ -932,6 +884,7 @@ export default function CentralDoGaloPage({
   initialSection?: SecaoAtiva;
 }) {
   const router = useRouter();
+  const { playVideo } = useYoutubePlayer();
   const [noticias, setNoticias] = useState<Noticia[]>([]);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [fontesDisponiveis, setFontesDisponiveis] = useState<Fonte[]>([]);
@@ -963,7 +916,6 @@ export default function CentralDoGaloPage({
   const [statusVideos, setStatusVideos] = useState<VideoStatus | null>(null);
   const [carregandoVideos, setCarregandoVideos] = useState(false);
   const [erroVideos, setErroVideos] = useState<string | null>(null);
-  const [videoAtivo, setVideoAtivo] = useState<VideoYoutube | null>(null);
   const [capaSite, setCapaSite] = useState<CapaSiteConfig | null>(null);
   const [capaAberta, setCapaAberta] = useState(false);
 
@@ -1171,10 +1123,7 @@ export default function CentralDoGaloPage({
       destino_url: video.url,
     }).catch(() => undefined);
 
-    setVideoAtivo(video);
-    window.requestAnimationFrame(() => {
-      document.getElementById("youtube-player")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
+    playVideo(video);
   }
 
   function montarParametros(offset: number) {
@@ -1606,13 +1555,6 @@ export default function CentralDoGaloPage({
           Elenco
         </button>
       </nav>
-
-      <YoutubePersistentPlayer
-        video={videoAtivo}
-        mini={secaoAtiva !== "videos"}
-        onClose={() => setVideoAtivo(null)}
-        onReturn={() => navegarPara("videos")}
-      />
 
       {secaoAtiva === "noticias" && (
         <>
