@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import DadosSection from "./DadosSection";
-import { publicApiFetch } from "../lib/publicApi";
+import { publicApiFetch, xMediaUrl } from "../lib/publicApi";
 
 type CategoriaResumo = {
   nome: string;
@@ -543,7 +543,7 @@ function XMediaGallery({
           key={`${imagem.url}-${index}`}
         >
           <img
-            src={`/api/x/media?url=${encodeURIComponent(imagem.url)}`}
+            src={xMediaUrl(imagem.url)}
             alt="Imagem anexada à publicação no X"
             loading="lazy"
           />
@@ -1064,12 +1064,12 @@ export default function CentralDoGaloPage({
       });
       if (perfilSelecionadoX) paramsX.set("usuario", perfilSelecionadoX);
 
-      const feedPromise = fetch(`${API_URL}/api/x/feed?${paramsX.toString()}`, {
+      const feedPromise = publicApiFetch(`/api/x/feed?${paramsX.toString()}`, {
         cache: "no-store",
       });
       const statusPromise = append
         ? Promise.resolve<Response | null>(null)
-        : fetch(`${API_URL}/api/x/status`, { cache: "no-store" });
+        : publicApiFetch("/api/x/status", { cache: "no-store" });
 
       const [feedResponse, statusResponse] = await Promise.all([feedPromise, statusPromise]);
 
