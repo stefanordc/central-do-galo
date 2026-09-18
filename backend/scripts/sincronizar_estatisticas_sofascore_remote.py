@@ -60,6 +60,15 @@ def main() -> None:
                 estatisticas = _sofascore_get(f"/event/{event_id}/statistics")
                 lineups = _sofascore_get(f"/event/{event_id}/lineups")
 
+                logger.info(
+                    "[Dados] lineups keys=%s home_type=%s away_type=%s home_players=%s away_players=%s",
+                    list(lineups.keys()) if isinstance(lineups, dict) else type(lineups).__name__,
+                    type(lineups.get("home")).__name__ if isinstance(lineups, dict) else "-",
+                    type(lineups.get("away")).__name__ if isinstance(lineups, dict) else "-",
+                    len((lineups.get("home") or {}).get("players") or []) if isinstance(lineups, dict) and isinstance(lineups.get("home"), dict) else "-",
+                    len((lineups.get("away") or {}).get("players") or []) if isinstance(lineups, dict) and isinstance(lineups.get("away"), dict) else "-",
+                )
+
                 result = remote_call(
                     "save_game",
                     jogo_id=str(jogo["id"]),
