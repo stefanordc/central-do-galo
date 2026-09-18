@@ -188,23 +188,27 @@ function sofaEventId(game: JsonObject): number | null {
 }
 
 function sofaPlayers(lineups: JsonObject, lado: "home" | "away"): JsonObject[] {
-  const players = Array.isArray(lineups?.[lado]?.players) ? lineups[lado].players : [];
-  return players
-    .map((item: JsonObject) => {
-      const player = item?.player ?? {};
-      const id = Number(player?.id);
-      if (!Number.isFinite(id)) return null;
-      return {
-        jogador_id: id,
-        nome: String(player?.name ?? player?.shortName ?? "Jogador"),
-        nome_guerra: String(player?.shortName ?? player?.name ?? "Jogador"),
-        posicao: player?.position ?? item?.position ?? null,
-        camisa: item?.shirtNumber ?? null,
-        titular: !Boolean(item?.substitute),
-        estatisticas: item?.statistics ?? {},
-      };
-    })
-    .filter((item: JsonObject | null): item is JsonObject => item !== null);
+  const source = Array.isArray(lineups?.[lado]?.players) ? lineups[lado].players : [];
+  const result: JsonObject[] = [];
+
+  for (const raw of source) {
+    const item = raw as JsonObject;
+    const player = item?.player ?? {};
+    const id = Number(player?.id);
+    if (!Number.isFinite(id)) continue;
+
+    result.push({
+      jogador_id: id,
+      nome: String(player?.name ?? player?.shortName ?? "Jogador"),
+      nome_guerra: String(player?.shortName ?? player?.name ?? "Jogador"),
+      posicao: player?.position ?? item?.position ?? null,
+      camisa: item?.shirtNumber ?? null,
+      titular: !Boolean(item?.substitute),
+      estatisticas: item?.statistics ?? {},
+    });
+  }
+
+  return result;
 }
 
 function statMap(teamBlock: JsonObject): Map<string, unknown> {
@@ -279,82 +283,84 @@ function apiFootballCollective(statsResponse: JsonObject[], fixture: JsonObject)
 
 function apiFootballPlayers(playersResponse: JsonObject[], fixture: JsonObject): JsonObject[] {
   const galo = playersResponse.find((x) => Number(x?.team?.id) === TEAM_ID);
-  const players = Array.isArray(galo?.players) ? galo.players : [];
+  const source = Array.isArray(galo?.players) ? galo.players : [];
+  const result: JsonObject[] = [];
 
-  return players
-    .map((row: JsonObject) => {
-      const p = row?.player ?? {};
-      const s = Array.isArray(row?.statistics) ? row.statistics[0] ?? {} : {};
-      const games = s?.games ?? {};
-      const passes = s?.passes ?? {};
-      const shots = s?.shots ?? {};
-      const goals = s?.goals ?? {};
-      const tackles = s?.tackles ?? {};
-      const duels = s?.duels ?? {};
-      const dribbles = s?.dribbles ?? {};
-      const fouls = s?.fouls ?? {};
-      const penalty = s?.penalty ?? {};
+  for (const raw of source) {
+    const row = raw as JsonObject;
+    const p = row?.player ?? {};
+    const s = Array.isArray(row?.statistics) ? row.statistics[0] ?? {} : {};
+    const games = s?.games ?? {};
+    const passes = s?.passes ?? {};
+    const shots = s?.shots ?? {};
+    const goals = s?.goals ?? {};
+    const tackles = s?.tackles ?? {};
+    const duels = s?.duels ?? {};
+    const dribbles = s?.dribbles ?? {};
+    const fouls = s?.fouls ?? {};
+    const penalty = s?.penalty ?? {};
 
-      const totalPass = numberValue(passes?.total);
-      const accuracyPct = numberValue(passes?.accuracy);
-      const accuratePass =
-        totalPass != null && accuracyPct != null
-          ? Math.round((totalPass * accuracyPct) / 100)
-          : null;
+    const id = Number(p?.id);
+    if (!Number.isFinite(id)) continue;
 
-      const duelTotal = numberValue(duels?.total);
-      const duelWon = numberValue(duels?.won);
-      const totalShots = numberValue(shots?.total);
-      const shotsOn = numberValue(shots?.on);
+    const totalPass = numberValue(passes?.total);
+    const accuracyPct = numberValue(passes?.accuracy);
+    const accuratePass =
+      totalPass != null && accuracyPct != null
+        ? Math.round((totalPass * accuracyPct) / 100)
+        : null;
 
-      const estatisticas: JsonObject = {
-        minutesPlayed: numberValue(games?.minutes),
-        rating: numberValue(games?.rating),
-        goals: numberValue(goals?.total),
-        goalAssist: numberValue(goals?.assists),
-        saves: numberValue(goals?.saves),
-        totalShots,
-        onTargetScoringAttempt: shotsOn,
-        shotOffTarget:
-          totalShots != null && shotsOn != null ? Math.max(0, totalShots - shotsOn) : null,
-        totalPass,
-        accuratePass,
-        keyPass: numberValue(passes?.key),
-        totalTackle: numberValue(tackles?.total),
-        outfielderBlock: numberValue(tackles?.blocks),
-        interceptionWon: numberValue(tackles?.interceptions),
-        duelWon,
-        duelLost:
-          duelTotal != null && duelWon != null ? Math.max(0, duelTotal - duelWon) : null,
-        totalContest: numberValue(dribbles?.attempts),
-        wonContest: numberValue(dribbles?.success),
-        challengeLost: numberValue(dribbles?.past),
-        fouls: numberValue(fouls?.committed),
-        wasFouled: numberValue(fouls?.drawn),
-        penaltyWon: numberValue(penalty?.won),
-        penaltyConceded: numberValue(penalty?.commited),
-        penaltyMiss: numberValue(penalty?.missed),
-        penaltySave: numberValue(penalty?.saved),
-      };
+    const duelTotal = numberValue(duels?.total);
+    const duelWon = numberValue(duels?.won);
+    const totalShots = numberValue(shots?.total);
+    const shotsOn = numberValue(shots?.on);
 
-      for (const key of Object.keys(estatisticas)) {
-        if (estatisticas[key] == null) delete estatisticas[key];
-      }
+    const estatisticas: JsonObject = {
+      minutesPlayed: numberValue(games?.minutes),
+      rating: numberValue(games?.rating),
+      goals: numberValue(goals?.total),
+      goalAssist: numberValue(goals?.assists),
+      saves: numberValue(goals?.saves),
+      totalShots,
+      onTargetScoringAttempt: shotsOn,
+      shotOffTarget:
+        totalShots != null && shotsOn != null ? Math.max(0, totalShots - shotsOn) : null,
+      totalPass,
+      accuratePass,
+      keyPass: numberValue(passes?.key),
+      totalTackle: numberValue(tackles?.total),
+      outfielderBlock: numberValue(tackles?.blocks),
+      interceptionWon: numberValue(tackles?.interceptions),
+      duelWon,
+      duelLost:
+        duelTotal != null && duelWon != null ? Math.max(0, duelTotal - duelWon) : null,
+      totalContest: numberValue(dribbles?.attempts),
+      wonContest: numberValue(dribbles?.success),
+      challengeLost: numberValue(dribbles?.past),
+      fouls: numberValue(fouls?.committed),
+      wasFouled: numberValue(fouls?.drawn),
+      penaltyWon: numberValue(penalty?.won),
+      penaltyConceded: numberValue(penalty?.commited),
+      penaltyMiss: numberValue(penalty?.missed),
+      penaltySave: numberValue(penalty?.saved),
+    };
 
-      const id = Number(p?.id);
-      if (!Number.isFinite(id)) return null;
+    for (const key of Object.keys(estatisticas)) {
+      if (estatisticas[key] == null) delete estatisticas[key];
+    }
 
-      return {
-        jogador_id: id,
-        nome: String(p?.name ?? "Jogador"),
-        nome_guerra: String(p?.name ?? "Jogador"),
-        posicao: games?.position ?? null,
-        camisa: games?.number ?? null,
-        titular: !Boolean(games?.substitute),
-        estatisticas,
-      };
-    })
-    .filter((item: JsonObject | null): item is JsonObject => item !== null);
+    result.push({
+      jogador_id: id,
+      nome: String(p?.name ?? "Jogador"),
+      nome_guerra: String(p?.name ?? "Jogador"),
+      posicao: games?.position ?? null,
+      camisa: games?.number ?? null,
+      titular: !Boolean(games?.substitute),
+      estatisticas,
+    });
+  }
+
+  return result;
 }
 
 async function saveStats(
