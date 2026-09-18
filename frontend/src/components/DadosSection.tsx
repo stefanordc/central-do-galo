@@ -497,14 +497,14 @@ export default function DadosSection() {
         .dados-header h2 { margin: 0; font-size: 34px; }
         .dados-tabs, .dados-rapidos, .dados-modos { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 16px; }
         .dados-subtabs { margin-top: -4px; }
-        .dados-tabs button, .dados-rapidos button, .dados-modos button { min-height: 40px; border: 1px solid #d8d8d8; border-radius: 999px; background: #fff; padding: 0 18px; font-weight: 800; cursor: pointer; }
+        .dados-tabs button, .dados-rapidos button, .dados-modos button { min-height: 40px; border: 1px solid #d8d8d8; border-radius: 999px; background: #fff; color: #111; padding: 0 18px; font-weight: 800; cursor: pointer; -webkit-appearance: none; appearance: none; }
         .dados-tabs button.active, .dados-rapidos button.active, .dados-modos button.active { background: #050505; border-color: #050505; color: #fff; }
         .dados-rapidos button, .dados-modos button { min-height: 34px; padding: 0 14px; font-size: 12px; }
         .dados-modos { margin-top: 2px; margin-bottom: 8px; }
         .dados-filtros { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 12px; margin: 18px 0 12px; }
         .dados-filtros label { display: grid; gap: 6px; min-width: 0; }
         .dados-filtros span { color: #6e7480; font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: .08em; }
-        .dados-filtros select { width: 100%; min-height: 44px; border: 1px solid #d8d8d8; border-radius: 12px; background: #fff; padding: 0 12px; }
+        .dados-filtros select { width: 100%; min-height: 44px; border: 1px solid #d8d8d8; border-radius: 12px; background: #fff; color: #111; padding: 0 12px; }
         .dados-status { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; margin: 8px 0 18px; color: #687081; font-size: 13px; }
         .dados-status strong { color: #111; font-size: 18px; }
         .dados-state { display: grid; gap: 5px; border: 1px solid #dedede; border-radius: 16px; background: #fff; padding: 18px; }
