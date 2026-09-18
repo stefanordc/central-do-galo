@@ -1,5 +1,6 @@
 import argparse
 import logging
+import os
 from pathlib import Path
 import sys
 
@@ -10,6 +11,7 @@ if str(ROOT) not in sys.path:
 from app.core.config import get_settings
 from app.db.pool import close_pool, open_pool
 from app.services.x_scrape_service import XScrapeService
+from app.services.x_remote_scrape_service import RemoteXScrapeService
 from app.services.x_service import listar_contas_x
 from app.services.x_sync_service import XSyncService
 
@@ -58,39 +60,61 @@ def main() -> int:
     print("Embed: publish.x.com/oembed")
     print("Escopo: " + (", ".join(f"@{item}" for item in solicitadas) if solicitadas else "todas as contas ativas"))
 
-    open_pool()
+    usar_store_remoto = bool((os.getenv("X_REMOTE_STORE_URL") or "").strip())
+
+    if not usar_store_remoto:
+        open_pool()
+
     service = None
     try:
-        cadastradas = listar_contas_x()
-        if solicitadas:
-            alvo = {item.lower() for item in solicitadas}
-            contas = [item for item in cadastradas if item["usuario"].lower() in alvo]
-        else:
-            contas = cadastradas
-
-        print(f"Contas ativas encontradas no Supabase: {len(contas)}")
-        for conta in contas:
-            logger.info(
-                "[preflight] @%s cadastrada=SIM ativa=SIM status=%s",
-                conta["usuario"],
-                conta.get("status_sync") or "-",
-            )
-
-        if solicitadas:
-            encontradas = {item["usuario"].lower() for item in contas}
-            ausentes = [item for item in solicitadas if item.lower() not in encontradas]
-            for usuario in ausentes:
-                logger.error("[preflight] @%s cadastrada=NAO/INATIVA", usuario)
-            if ausentes:
-                return 3
-
         if source == "x_api_v2":
             if not (settings.x_bearer_token or "").strip():
                 print("ERRO: X_SOURCE=x_api_v2, mas X_BEARER_TOKEN não está configurado.")
                 return 2
             service = XSyncService()
+        elif usar_store_remoto:
+            service = RemoteXScrapeService()
         else:
             service = XScrapeService()
+
+        if usar_store_remoto:
+            contas = service._contas_ativas(
+                usuario=solicitadas[0] if len(solicitadas) == 1 else None
+            )
+            if solicitadas:
+                alvo = {item.lower() for item in solicitadas}
+                contas = [item for item in contas if item.usuario.lower() in alvo]
+
+            print(f"Contas ativas encontradas no Supabase: {len(contas)}")
+            encontradas = {item.usuario.lower() for item in contas}
+            ausentes = [item for item in solicitadas if item.lower() not in encontradas]
+            if ausentes:
+                for usuario in ausentes:
+                    logger.error("[preflight] @%s cadastrada=NAO/INATIVA", usuario)
+                return 3
+        else:
+            cadastradas = listar_contas_x()
+            if solicitadas:
+                alvo = {item.lower() for item in solicitadas}
+                contas = [item for item in cadastradas if item["usuario"].lower() in alvo]
+            else:
+                contas = cadastradas
+
+            print(f"Contas ativas encontradas no Supabase: {len(contas)}")
+            for conta in contas:
+                logger.info(
+                    "[preflight] @%s cadastrada=SIM ativa=SIM status=%s",
+                    conta["usuario"],
+                    conta.get("status_sync") or "-",
+                )
+
+            if solicitadas:
+                encontradas = {item["usuario"].lower() for item in contas}
+                ausentes = [item for item in solicitadas if item.lower() not in encontradas]
+                for usuario in ausentes:
+                    logger.error("[preflight] @%s cadastrada=NAO/INATIVA", usuario)
+                if ausentes:
+                    return 3
 
         resultados: list[dict] = []
         if solicitadas:
@@ -119,7 +143,8 @@ def main() -> int:
     finally:
         if service is not None:
             service.close()
-        close_pool()
+        if not usar_store_remoto:
+            close_pool()
 
 
 if __name__ == "__main__":
