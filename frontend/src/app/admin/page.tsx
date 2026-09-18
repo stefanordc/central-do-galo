@@ -85,6 +85,41 @@ type JogadorAdmin = {
   foto_url: string | null;
 };
 
+type PeriodoAcessos = "hora" | "dia" | "mes" | "ano";
+
+type AcessoSerieItem = {
+  inicio: string;
+  acessos: number;
+  sessoes: number;
+};
+
+type AcessoPaginaItem = {
+  caminho: string;
+  acessos: number;
+};
+
+type AcessosResumo = {
+  periodo: PeriodoAcessos;
+  inicio: string | null;
+  fim: string | null;
+  total_acessos: number;
+  sessoes: number;
+  paginas_distintas: number;
+  serie: AcessoSerieItem[];
+  paginas: AcessoPaginaItem[];
+};
+
+const ACESSOS_VAZIO: AcessosResumo = {
+  periodo: "dia",
+  inicio: null,
+  fim: null,
+  total_acessos: 0,
+  sessoes: 0,
+  paginas_distintas: 0,
+  serie: [],
+  paginas: [],
+};
+
 function slugify(valor: string): string {
   return valor
     .normalize("NFD")
@@ -102,6 +137,56 @@ function normalizarTexto(valor: string): string {
     .trim();
 }
 
+function formatarPeriodoAcesso(valor: string, periodo: PeriodoAcessos): string {
+  const data = new Date(valor);
+  if (Number.isNaN(data.getTime())) return valor;
+
+  if (periodo === "hora") {
+    return new Intl.DateTimeFormat("pt-BR", {
+      timeZone: "America/Sao_Paulo",
+      day: "2-digit",
+      month: "2-digit",
+      hour: "2-digit",
+      hour12: false,
+    }).format(data);
+  }
+
+  if (periodo === "dia") {
+    return new Intl.DateTimeFormat("pt-BR", {
+      timeZone: "America/Sao_Paulo",
+      day: "2-digit",
+      month: "2-digit",
+    }).format(data);
+  }
+
+  if (periodo === "mes") {
+    return new Intl.DateTimeFormat("pt-BR", {
+      timeZone: "America/Sao_Paulo",
+      month: "short",
+      year: "2-digit",
+    }).format(data).replace(".", "");
+  }
+
+  return new Intl.DateTimeFormat("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+  }).format(data);
+}
+
+function nomePaginaAcesso(caminho: string): string {
+  const nomes: Record<string, string> = {
+    "/": "Início / Notícias",
+    "/noticias": "Notícias",
+    "/videos": "Vídeos",
+    "/x": "X",
+    "/jogos": "Jogos",
+    "/dados": "Dados",
+    "/elenco": "Elenco",
+  };
+
+  return nomes[caminho] ?? caminho;
+}
+
 export default function AdminPage() {
   const [token, setToken] = useState("");
   const [email, setEmail] = useState(ADMIN_EMAIL);
@@ -113,7 +198,10 @@ export default function AdminPage() {
   const [canaisYoutube, setCanaisYoutube] = useState<CanalYoutubeAdmin[]>([]);
   const [jogadores, setJogadores] = useState<JogadorAdmin[]>([]);
   const [mensagem, setMensagem] = useState<string | null>(null);
-  const [abaAdmin, setAbaAdmin] = useState<"geral" | "elenco">("geral");
+  const [abaAdmin, setAbaAdmin] = useState<"geral" | "elenco" | "acessos">("geral");
+  const [periodoAcessos, setPeriodoAcessos] = useState<PeriodoAcessos>("dia");
+  const [acessosResumo, setAcessosResumo] = useState<AcessosResumo>(ACESSOS_VAZIO);
+  const [carregandoAcessos, setCarregandoAcessos] = useState(false);
 
   const [tituloPagina, setTituloPagina] = useState("");
   const [slugPagina, setSlugPagina] = useState("");
@@ -200,6 +288,11 @@ export default function AdminPage() {
     carregarDados();
   }, [token]);
 
+  useEffect(() => {
+    if (!token || abaAdmin !== "acessos") return;
+    void carregarAcessos(periodoAcessos);
+  }, [token, abaAdmin, periodoAcessos]);
+
   async function carregarDados() {
     const headers = { ...authHeaders };
     const [paginasResponse, contasResponse, canaisYoutubeResponse, capaResponse, elencoResponse] = await Promise.all([
@@ -261,6 +354,50 @@ export default function AdminPage() {
     }
   }
 
+  async function carregarAcessos(periodo: PeriodoAcessos) {
+    if (!token) return;
+
+    setCarregandoAcessos(true);
+    try {
+      const response = await adminApiFetch(
+        `/acessos?periodo=${encodeURIComponent(periodo)}`,
+        {
+          headers: { ...authHeaders },
+          cache: "no-store",
+        }
+      );
+
+      if (response.status === 401) {
+        sair();
+        return;
+      }
+
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(body.detail ?? "Não foi possível carregar os acessos.");
+      }
+
+      setAcessosResumo({
+        periodo,
+        inicio: body.inicio ?? null,
+        fim: body.fim ?? null,
+        total_acessos: Number(body.total_acessos ?? 0),
+        sessoes: Number(body.sessoes ?? 0),
+        paginas_distintas: Number(body.paginas_distintas ?? 0),
+        serie: Array.isArray(body.serie) ? body.serie : [],
+        paginas: Array.isArray(body.paginas) ? body.paginas : [],
+      });
+    } catch (error) {
+      setMensagem(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível carregar os acessos."
+      );
+    } finally {
+      setCarregandoAcessos(false);
+    }
+  }
+
   async function entrar(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setCarregandoLogin(true);
@@ -291,6 +428,7 @@ export default function AdminPage() {
     setContas([]);
     setCanaisYoutube([]);
     setJogadores([]);
+    setAcessosResumo(ACESSOS_VAZIO);
     limparFormularioJogador();
     setBuscaCanal("");
     setCanalSelecionado("");
@@ -729,9 +867,145 @@ export default function AdminPage() {
           Elenco
           <span>{jogadores.length}</span>
         </button>
+        <button
+          type="button"
+          className={abaAdmin === "acessos" ? "active" : ""}
+          onClick={() => setAbaAdmin("acessos")}
+        >
+          Acessos
+        </button>
       </nav>
 
-      <section className={`admin-grid ${abaAdmin === "elenco" ? "admin-grid-elenco" : "admin-grid-geral"}`}>
+      <section
+        className={`admin-grid ${
+          abaAdmin === "elenco"
+            ? "admin-grid-elenco"
+            : abaAdmin === "acessos"
+              ? "admin-grid-acessos"
+              : "admin-grid-geral"
+        }`}
+      >
+        <article className="admin-panel admin-access-panel">
+          <div className="admin-panel-heading">
+            <div>
+              <span className="eyebrow">AUDIÊNCIA</span>
+              <h2>Acessos ao site</h2>
+            </div>
+            <span>{carregandoAcessos ? "Atualizando..." : "Tempo de Brasília"}</span>
+          </div>
+
+          <div className="admin-access-periods" role="group" aria-label="Agrupar acessos por período">
+            {(["hora", "dia", "mes", "ano"] as PeriodoAcessos[]).map((periodo) => (
+              <button
+                key={periodo}
+                type="button"
+                className={periodoAcessos === periodo ? "active" : ""}
+                onClick={() => setPeriodoAcessos(periodo)}
+              >
+                {periodo === "hora"
+                  ? "Hora"
+                  : periodo === "dia"
+                    ? "Dia"
+                    : periodo === "mes"
+                      ? "Mês"
+                      : "Ano"}
+              </button>
+            ))}
+          </div>
+
+          <div className="admin-access-kpis">
+            <div>
+              <span>Acessos</span>
+              <strong>{acessosResumo.total_acessos.toLocaleString("pt-BR")}</strong>
+            </div>
+            <div>
+              <span>Sessões</span>
+              <strong>{acessosResumo.sessoes.toLocaleString("pt-BR")}</strong>
+            </div>
+            <div>
+              <span>Páginas acessadas</span>
+              <strong>{acessosResumo.paginas_distintas.toLocaleString("pt-BR")}</strong>
+            </div>
+          </div>
+
+          <div className="admin-access-chart">
+            <div className="admin-access-chart-heading">
+              <div>
+                <span className="eyebrow">EVOLUÇÃO</span>
+                <h3>
+                  {periodoAcessos === "hora"
+                    ? "Últimas 24 horas"
+                    : periodoAcessos === "dia"
+                      ? "Últimos 30 dias"
+                      : periodoAcessos === "mes"
+                        ? "Últimos 12 meses"
+                        : "Últimos 5 anos"}
+                </h3>
+              </div>
+            </div>
+
+            <div className="admin-access-bars" aria-label="Gráfico de acessos">
+              {acessosResumo.serie.map((item) => {
+                const maximo = Math.max(
+                  1,
+                  ...acessosResumo.serie.map((serieItem) => Number(serieItem.acessos ?? 0))
+                );
+                const altura =
+                  item.acessos > 0
+                    ? Math.max(6, Math.round((item.acessos / maximo) * 150))
+                    : 2;
+
+                return (
+                  <div className="admin-access-bar-item" key={item.inicio}>
+                    <div className="admin-access-bar-value">
+                      {Number(item.acessos ?? 0).toLocaleString("pt-BR")}
+                    </div>
+                    <div
+                      className="admin-access-bar"
+                      style={{ height: `${altura}px` }}
+                      title={`${formatarPeriodoAcesso(item.inicio, periodoAcessos)}: ${item.acessos} acesso(s)`}
+                    />
+                    <span>{formatarPeriodoAcesso(item.inicio, periodoAcessos)}</span>
+                  </div>
+                );
+              })}
+            </div>
+
+            {acessosResumo.total_acessos === 0 && !carregandoAcessos && (
+              <div className="admin-access-empty">
+                Ainda não há acessos registrados nesse período.
+              </div>
+            )}
+          </div>
+
+          <div className="admin-access-pages">
+            <div className="admin-access-chart-heading">
+              <div>
+                <span className="eyebrow">PÁGINAS</span>
+                <h3>Mais acessadas</h3>
+              </div>
+            </div>
+
+            {acessosResumo.paginas.length > 0 ? (
+              <div className="admin-list">
+                {acessosResumo.paginas.map((pagina) => (
+                  <div className="admin-list-item" key={pagina.caminho}>
+                    <div>
+                      <strong>{nomePaginaAcesso(pagina.caminho)}</strong>
+                      <span>{pagina.caminho}</span>
+                    </div>
+                    <strong>{pagina.acessos.toLocaleString("pt-BR")}</strong>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="admin-access-empty">
+                Nenhuma página acessada nesse período.
+              </div>
+            )}
+          </div>
+        </article>
+
         <article className="admin-panel admin-tab-geral">
           <div className="admin-panel-heading">
             <div>
@@ -1304,6 +1578,155 @@ export default function AdminPage() {
 
         .admin-grid-elenco .admin-tab-geral {
           display: none;
+        }
+
+        .admin-grid-geral .admin-access-panel,
+        .admin-grid-elenco .admin-access-panel {
+          display: none;
+        }
+
+        .admin-grid-acessos .admin-tab-geral,
+        .admin-grid-acessos .admin-squad-panel {
+          display: none;
+        }
+
+        .admin-access-panel {
+          grid-column: 1 / -1;
+        }
+
+        .admin-access-periods {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          margin-bottom: 18px;
+        }
+
+        .admin-access-periods button {
+          min-height: 40px;
+          padding: 0 16px;
+          border: 1px solid #dedede;
+          border-radius: 999px;
+          background: #ffffff;
+          color: #111111;
+          font-weight: 800;
+          cursor: pointer;
+        }
+
+        .admin-access-periods button.active {
+          border-color: #111111;
+          background: #111111;
+          color: #ffffff;
+        }
+
+        .admin-access-kpis {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 12px;
+          margin-bottom: 22px;
+        }
+
+        .admin-access-kpis > div {
+          min-width: 0;
+          padding: 18px;
+          border: 1px solid #e5e7eb;
+          border-radius: 14px;
+          background: #fafafa;
+        }
+
+        .admin-access-kpis span {
+          display: block;
+          margin-bottom: 8px;
+          color: #6b7280;
+          font-size: 12px;
+          font-weight: 800;
+          letter-spacing: 0.04em;
+          text-transform: uppercase;
+        }
+
+        .admin-access-kpis strong {
+          display: block;
+          font-size: clamp(26px, 4vw, 40px);
+          line-height: 1;
+        }
+
+        .admin-access-chart,
+        .admin-access-pages {
+          margin-top: 18px;
+          padding-top: 18px;
+          border-top: 1px solid #e5e7eb;
+        }
+
+        .admin-access-chart-heading h3 {
+          margin: 3px 0 0;
+          font-size: 20px;
+        }
+
+        .admin-access-bars {
+          min-height: 220px;
+          display: flex;
+          align-items: flex-end;
+          gap: 6px;
+          margin-top: 18px;
+          padding: 14px 8px 0;
+          overflow-x: auto;
+          border: 1px solid #e5e7eb;
+          border-radius: 14px;
+          background: #fafafa;
+        }
+
+        .admin-access-bar-item {
+          min-width: 38px;
+          flex: 1 0 38px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: flex-end;
+          gap: 6px;
+          min-height: 190px;
+        }
+
+        .admin-access-bar-value {
+          min-height: 16px;
+          font-size: 10px;
+          font-weight: 800;
+          color: #4b5563;
+        }
+
+        .admin-access-bar {
+          width: min(26px, 70%);
+          min-height: 2px;
+          border-radius: 6px 6px 2px 2px;
+          background: #111111;
+        }
+
+        .admin-access-bar-item > span {
+          min-height: 32px;
+          display: flex;
+          align-items: flex-start;
+          justify-content: center;
+          text-align: center;
+          color: #6b7280;
+          font-size: 9px;
+          line-height: 1.2;
+          white-space: nowrap;
+        }
+
+        .admin-access-empty {
+          padding: 24px;
+          border: 1px dashed #d1d5db;
+          border-radius: 12px;
+          color: #6b7280;
+          text-align: center;
+        }
+
+        @media (max-width: 720px) {
+          .admin-access-kpis {
+            grid-template-columns: 1fr;
+          }
+
+          .admin-tabs {
+            overflow-x: auto;
+          }
         }
 
         .admin-squad-panel {
