@@ -48,6 +48,35 @@ select {
   font: inherit;
 }
 
+/*
+ * O portal não usa azul em nenhum estado de interação.
+ * Define explicitamente a cor dos controles para evitar o azul nativo
+ * do Safari/iOS em links, botões, selects e estados de toque/foco.
+ */
+a,
+a:visited,
+button,
+input,
+select,
+textarea {
+  color: var(--text);
+  -webkit-tap-highlight-color: rgba(212, 175, 55, 0.18);
+}
+
+button {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+select {
+  color: var(--text);
+}
+
+option {
+  color: var(--text);
+  background: #ffffff;
+}
+
 button,
 input,
 select {
