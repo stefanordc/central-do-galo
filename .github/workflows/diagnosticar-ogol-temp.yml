@@ -1,0 +1,56 @@
+name: Diagnosticar oGol
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/diagnosticar-ogol-temp.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostico:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install selenium beautifulsoup4
+
+      - name: Abrir página do oGol
+        run: |
+          python - <<'PY'
+          import time
+          from bs4 import BeautifulSoup
+          from selenium import webdriver
+
+          options = webdriver.ChromeOptions()
+          options.add_argument("--headless=new")
+          options.add_argument("--no-sandbox")
+          options.add_argument("--disable-dev-shm-usage")
+          options.add_argument("--window-size=1920,1080")
+          options.add_argument("--disable-blink-features=AutomationControlled")
+          options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36")
+
+          driver = webdriver.Chrome(options=options)
+          try:
+              url = "https://www.ogol.com.br/equipe/atletico-mineiro/estatisticas"
+              driver.get(url)
+              time.sleep(8)
+              print("URL FINAL:", driver.current_url)
+              print("TITLE:", driver.title)
+              html = driver.page_source
+              print("HTML LEN:", len(html))
+              soup = BeautifulSoup(html, "html.parser")
+              text = soup.get_text(" ", strip=True)
+              print("TEXT PREVIEW:", text[:5000])
+          finally:
+              driver.quit()
+          PY
