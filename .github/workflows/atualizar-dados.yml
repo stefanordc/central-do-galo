@@ -2,7 +2,8 @@ name: Atualizar dados do Galo
 
 on:
   schedule:
-    # GitHub Actions usa UTC. 03:00 UTC = 00:00 em Brasília.
+    # GitHub Actions usa UTC.
+    # 03:00 UTC = 00:00 no horário de Brasília.
     - cron: "0 3 * * *"
   workflow_dispatch:
   push:
@@ -10,31 +11,32 @@ on:
       - main
     paths:
       - ".github/workflows/atualizar-dados.yml"
-      - "backend/scripts/sincronizar_estatisticas_remoto.py"
+      - "backend/app/services/data_collector_store.py"
+      - "backend/scripts/sincronizar_estatisticas_sofascore_remote.py"
       - "backend/app/services/jogo_service.py"
-      - "backend/app/services/dados_service.py"
 
 permissions:
   contents: read
   id-token: write
 
 concurrency:
-  group: atualizar-dados-galo-v2
+  group: atualizar-dados-galo
   cancel-in-progress: false
 
 jobs:
-  sincronizar:
-    name: Estatísticas coletivas e individuais
+  atualizar-dados:
+    name: Sincronizar estatísticas coletivas e individuais
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 60
 
     defaults:
       run:
         working-directory: backend
 
     env:
+      TZ: America/Sao_Paulo
       APP_ENV: production
-      DADOS_REMOTE_STORE_URL: https://lhrpsquyzehevxuogxar.supabase.co/functions/v1/dados-collector-store
+      DATA_REMOTE_STORE_URL: https://lhrpsquyzehevxuogxar.supabase.co/functions/v1/data-collector-store
 
     steps:
       - name: Baixar repositório
@@ -56,5 +58,5 @@ jobs:
         run: |
           google-chrome --version || chromium --version || true
 
-      - name: Sincronizar estatísticas pendentes
-        run: python scripts/sincronizar_estatisticas_remoto.py
+      - name: Sincronizar estatísticas
+        run: python scripts/sincronizar_estatisticas_sofascore_remote.py --ano 2026 --recent-days 4
