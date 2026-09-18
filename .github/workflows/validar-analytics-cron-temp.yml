@@ -6,6 +6,10 @@ on:
       - main
     paths:
       - ".github/workflows/validar-analytics-cron-temp.yml"
+      - "frontend/src/app/cron/dados/route.ts"
+      - "frontend/src/app/admin/page.tsx"
+      - "frontend/src/components/AccessTracker.tsx"
+      - "frontend/src/components/CentralDoGaloPage.tsx"
 
 jobs:
   build:
