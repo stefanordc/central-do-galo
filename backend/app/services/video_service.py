@@ -29,16 +29,43 @@ DIAS_INATIVIDADE_TIPO_YOUTUBE = 60
 
 FILTROS_ESPECIAIS_YOUTUBE: dict[str, dict[str, list[str]]] = {
     "youtube-getv": {
-        "incluir": ["Atlético-MG", "Galo"],
-        "excluir": ["Atlético Madrid", "Atlético de Madrid", "LaLiga"],
+        "incluir": ["Atlético-MG", "Atlético Mineiro", "Galo", "Atlético"],
+        "excluir": [
+            "Atlético Madrid",
+            "Atlético de Madrid",
+            "Atlético-GO",
+            "Atlético Goianiense",
+            "Athletico-PR",
+            "Athletico Paranaense",
+            "Atlético Nacional",
+            "LaLiga",
+        ],
     },
     "youtube-espnbrasil": {
-        "incluir": ["Atlético-MG", "Galo"],
-        "excluir": ["Atlético Madrid", "Atlético de Madrid", "LaLiga"],
+        "incluir": ["Atlético-MG", "Atlético Mineiro", "Galo", "Atlético"],
+        "excluir": [
+            "Atlético Madrid",
+            "Atlético de Madrid",
+            "Atlético-GO",
+            "Atlético Goianiense",
+            "Athletico-PR",
+            "Athletico Paranaense",
+            "Atlético Nacional",
+            "LaLiga",
+        ],
     },
     "youtube-cazetv": {
-        "incluir": ["Atlético-MG", "Galo"],
-        "excluir": ["Atlético Madrid", "Atlético de Madrid", "LaLiga"],
+        "incluir": ["Atlético-MG", "Atlético Mineiro", "Galo", "Atlético"],
+        "excluir": [
+            "Atlético Madrid",
+            "Atlético de Madrid",
+            "Atlético-GO",
+            "Atlético Goianiense",
+            "Athletico-PR",
+            "Athletico Paranaense",
+            "Atlético Nacional",
+            "LaLiga",
+        ],
     },
 }
 
