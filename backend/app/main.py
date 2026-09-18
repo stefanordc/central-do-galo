@@ -145,7 +145,12 @@ async def x_sync_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    open_pool()
+    banco_inicializado = False
+    try:
+        open_pool()
+        banco_inicializado = True
+    except Exception as exc:
+        logger.exception("[database] falha ao inicializar pool: %s", exc)
 
     is_vercel = os.getenv("VERCEL") == "1"
 
@@ -187,7 +192,8 @@ async def lifespan(_: FastAPI):
             with suppress(asyncio.CancelledError):
                 await task
 
-    close_pool()
+    if banco_inicializado:
+        close_pool()
 
 
 app = FastAPI(
