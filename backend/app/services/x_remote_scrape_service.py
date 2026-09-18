@@ -2,14 +2,65 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from urllib.parse import quote
 
+from app.core.config import get_settings
 from app.services.x_collector_store import remote_call
 from app.services.x_scrape_service import ContaScrape, ScrapedPost, XScrapeService
 
 logger = logging.getLogger("central_galo.x_remote")
+settings = get_settings()
 
 
 class RemoteXScrapeService(XScrapeService):
+    def _scrape_posts(self, conta: ContaScrape) -> list[ScrapedPost]:
+        syndication_url = (
+            "https://syndication.twitter.com/srv/timeline-profile/screen-name/"
+            + quote(conta.usuario, safe="")
+        )
+
+        try:
+            logger.info(
+                "[@%s] [syndication] GET %s",
+                conta.usuario,
+                syndication_url,
+            )
+            response = self.oembed_client.get(
+                syndication_url,
+                headers={
+                    "Accept": "text/html,application/xhtml+xml",
+                    "User-Agent": self.user_agent,
+                },
+            )
+
+            if response.is_success:
+                posts = self.extrair_posts_syndication_html(
+                    response.text,
+                    conta.usuario,
+                    limite=max(1, settings.x_scrape_posts_per_account),
+                )
+                if posts:
+                    logger.info(
+                        "[@%s] [syndication] %s publicação(ões) encontrada(s)",
+                        conta.usuario,
+                        len(posts),
+                    )
+                    return posts
+
+            logger.warning(
+                "[@%s] syndication indisponível/sem posts; fallback Selenium | HTTP=%s",
+                conta.usuario,
+                response.status_code,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[@%s] syndication falhou (%s); fallback Selenium",
+                conta.usuario,
+                exc,
+            )
+
+        return super()._scrape_posts(conta)
+
     def _contas_ativas(self, usuario: str | None = None) -> list[ContaScrape]:
         resultado = remote_call(
             "list_accounts",
