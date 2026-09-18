@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import AccessTracker from "../components/AccessTracker";
 
 export const metadata: Metadata = {
   title: "Central do Galo",
@@ -33,7 +34,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <link rel="dns-prefetch" href="https://www.youtube.com" />
         <link rel="dns-prefetch" href="https://i.ytimg.com" />
       </head>
-      <body>{children}</body>
+      <body><AccessTracker />{children}</body>
     </html>
   );
 }
