@@ -12,7 +12,7 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app.services.data_collector_store import remote_call
-from app.services.jogo_service import _sofascore_get, fechar_cliente_sofascore
+from app.services.jogo_service import _sofascore_get, _cliente_sofascore, fechar_cliente_sofascore
 
 logging.basicConfig(
     level=logging.INFO,
@@ -59,6 +59,14 @@ def main() -> None:
             try:
                 estatisticas = _sofascore_get(f"/event/{event_id}/statistics")
                 lineups = _sofascore_get(f"/event/{event_id}/lineups")
+                if isinstance(lineups, dict) and "error" in lineups:
+                    logger.warning(
+                        "[Dados] lineups no www retornou erro=%s; tentando api.sofascore.com",
+                        lineups.get("error"),
+                    )
+                    lineups = _cliente_sofascore().get_json(
+                        f"https://api.sofascore.com/api/v1/event/{event_id}/lineups"
+                    )
 
                 logger.info(
                     "[Dados] lineups keys=%s home_type=%s away_type=%s home_players=%s away_players=%s",
