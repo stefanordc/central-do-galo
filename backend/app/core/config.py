@@ -11,11 +11,11 @@ class Settings(BaseSettings):
     app_port: int = 8000
     cron_secret: str | None = None
 
-    db_host: str
+    db_host: str = ""
     db_port: int = 5432
     db_name: str = "postgres"
-    db_user: str
-    db_password: str
+    db_user: str = ""
+    db_password: str = ""
     db_sslmode: str = "require"
 
     news_collection_enabled: bool = True
@@ -80,6 +80,17 @@ class Settings(BaseSettings):
 
     @property
     def database_url(self) -> str:
+        obrigatorias = {
+            "DB_HOST": self.db_host,
+            "DB_USER": self.db_user,
+            "DB_PASSWORD": self.db_password,
+        }
+        ausentes = [nome for nome, valor in obrigatorias.items() if not str(valor or "").strip()]
+        if ausentes:
+            raise RuntimeError(
+                "Variáveis de banco ausentes: " + ", ".join(ausentes)
+            )
+
         user = quote_plus(self.db_user)
         password = quote_plus(self.db_password)
         return (
