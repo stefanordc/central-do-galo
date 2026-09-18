@@ -1,3 +1,4 @@
+import os
 import secrets
 from datetime import date
 from typing import Literal
@@ -30,10 +31,11 @@ from app.services.jogador_service import (
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
-# Credenciais fixas solicitadas para o painel local.
-_ADMIN_EMAIL = "stefanobrunofaria@gmail.com"
-_ADMIN_PASSWORD = "Skt8punk@stefano"
-_ADMIN_SESSION_TOKEN = secrets.token_urlsafe(48)
+# Compatibilidade apenas para uso local do backend.
+# Em produção, o painel admin usa a Edge Function central-admin-api.
+_ADMIN_EMAIL = (os.getenv("ADMIN_EMAIL") or "").strip()
+_ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD") or ""
+_ADMIN_SESSION_TOKEN = (os.getenv("ADMIN_SESSION_TOKEN") or "").strip() or secrets.token_urlsafe(48)
 
 
 class AdminLoginIn(BaseModel):
@@ -99,6 +101,12 @@ def _validar_admin(authorization: str | None) -> None:
 
 @router.post("/login")
 def login_admin(payload: AdminLoginIn) -> dict:
+    if not _ADMIN_EMAIL or not _ADMIN_PASSWORD:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Admin local não configurado.",
+        )
+
     email_ok = secrets.compare_digest(payload.email.strip().lower(), _ADMIN_EMAIL.lower())
     senha_ok = secrets.compare_digest(payload.senha, _ADMIN_PASSWORD)
     if not (email_ok and senha_ok):
