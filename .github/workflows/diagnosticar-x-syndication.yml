@@ -1,4 +1,4 @@
-name: Diagnosticar syndication X
+name: Diagnosticar fallback X
 
 on:
   push:
@@ -11,6 +11,14 @@ jobs:
   teste:
     runs-on: ubuntu-latest
     steps:
-      - name: Testar saída do Supabase para syndication
+      - name: Testar RSS alternativos
         run: |
-          curl -sS https://lhrpsquyzehevxuogxar.supabase.co/functions/v1/x-syndication-test
+          set +e
+          for url in             "https://occupy-x.com/Atletico/rss"             "https://nitter.kareem.one/Atletico/rss"             "https://nitter.meowing.monster/Atletico/rss"             "https://x.n0g.xyz/Atletico/rss"
+          do
+            echo "============================================================"
+            echo "$url"
+            curl -L -A "Mozilla/5.0" --max-time 20 -sS -o /tmp/feed.txt -w "HTTP=%{http_code} FINAL=%{url_effective}\n" "$url"
+            head -c 500 /tmp/feed.txt
+            echo
+          done
