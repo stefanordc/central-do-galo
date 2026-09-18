@@ -119,7 +119,7 @@ type CompAdversario = {
 
 type Ordenacao = { chave: string; direcao: Direcao };
 
-const API_URL = "/backend";
+const API_URL = "";
 
 function fmt(valor: number | null | undefined, unidade?: string | null, maxDigits = 2) {
   if (valor == null || Number.isNaN(valor)) return "—";
