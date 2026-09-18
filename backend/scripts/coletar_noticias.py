@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -34,7 +35,11 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    open_pool()
+    usar_store_remoto = bool((os.getenv("NEWS_REMOTE_STORE_URL") or "").strip())
+
+    if not usar_store_remoto:
+        open_pool()
+
     try:
         runner = NewsCollectorRunner(
             delay_seconds=args.delay,
@@ -71,7 +76,8 @@ def main() -> None:
                 f"status={result.mensagem}"
             )
     finally:
-        close_pool()
+        if not usar_store_remoto:
+            close_pool()
 
 
 if __name__ == "__main__":
