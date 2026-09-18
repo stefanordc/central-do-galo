@@ -1264,7 +1264,7 @@ export default function CentralDoGaloPage({
     setCarregandoElenco(true);
 
     try {
-      const response = await fetch(`${API_URL}/api/elenco`, {
+      const response = await publicApiFetch("/api/elenco", {
         cache: "no-store",
       });
 
