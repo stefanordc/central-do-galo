@@ -34,6 +34,13 @@ def _coletar_eventos() -> tuple[list[dict], int]:
     if isinstance(pagina_passados, list):
         eventos.extend(pagina_passados)
 
+    if not pagina_passados:
+        logger.warning(
+            "[Jogos] resposta LAST sem events | chaves=%s | payload=%s",
+            list(passados.keys()),
+            json.dumps(passados, ensure_ascii=False, default=str)[:1800],
+        )
+
     pagina = 0
     paginas_futuras = 0
 
@@ -44,6 +51,14 @@ def _coletar_eventos() -> tuple[list[dict], int]:
 
         if isinstance(pagina_eventos, list):
             eventos.extend(pagina_eventos)
+
+        if not pagina_eventos:
+            logger.warning(
+                "[Jogos] resposta NEXT pagina=%s sem events | chaves=%s | payload=%s",
+                pagina,
+                list(dados.keys()),
+                json.dumps(dados, ensure_ascii=False, default=str)[:1800],
+            )
 
         paginas_futuras += 1
 
