@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import AccessTracker from "../components/AccessTracker";
+import YoutubePlayerProvider from "../components/YoutubePlayerProvider";
 
 export const metadata: Metadata = {
   title: "Central do Galo",
@@ -34,7 +35,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <link rel="dns-prefetch" href="https://www.youtube.com" />
         <link rel="dns-prefetch" href="https://i.ytimg.com" />
       </head>
-      <body><AccessTracker />{children}</body>
+      <body><YoutubePlayerProvider><AccessTracker />{children}</YoutubePlayerProvider></body>
     </html>
   );
 }
