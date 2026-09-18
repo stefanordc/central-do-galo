@@ -1111,8 +1111,8 @@ export default function CentralDoGaloPage({
       const carregarTipoPorCanal = async (tipo: VideoYoutube["tipo"]) => {
         const responses = await Promise.all(
           canaisYoutubeDisponiveis.map((fonte) =>
-            fetch(
-              `${API_URL}/api/videos?tipo=${tipo}&limit=${YOUTUBE_PAGE_SIZE}&offset=0&fonte=${encodeURIComponent(fonte.slug)}`,
+            publicApiFetch(
+              `/api/videos?tipo=${tipo}&limit=${YOUTUBE_PAGE_SIZE}&offset=0&fonte=${encodeURIComponent(fonte.slug)}`,
               { cache: "no-store" }
             )
           )
@@ -1140,7 +1140,7 @@ export default function CentralDoGaloPage({
         carregarTipoPorCanal("video"),
         carregarTipoPorCanal("short"),
         carregarTipoPorCanal("live"),
-        fetch(`${API_URL}/api/videos/status`, { cache: "no-store" }),
+        publicApiFetch("/api/videos/status", { cache: "no-store" }),
       ]);
 
       setVideosYoutube(videosData);
