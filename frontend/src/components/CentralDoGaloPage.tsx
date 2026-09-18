@@ -1229,10 +1229,10 @@ export default function CentralDoGaloPage({
       });
 
       const [jogosResponse, statusResponse] = await Promise.all([
-        fetch(`${API_URL}/api/jogos?${params.toString()}`, {
+        publicApiFetch(`/api/jogos?${params.toString()}`, {
           cache: "no-store",
         }),
-        fetch(`${API_URL}/api/jogos/status`, {
+        publicApiFetch("/api/jogos/status", {
           cache: "no-store",
         }),
       ]);
