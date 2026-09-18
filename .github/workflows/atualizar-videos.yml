@@ -9,6 +9,9 @@ on:
       - main
     paths:
       - ".github/workflows/atualizar-videos.yml"
+      - "backend/app/services/video_service.py"
+      - "backend/app/services/video_collector_store.py"
+      - "backend/scripts/sincronizar_youtube.py"
 
 permissions:
   contents: read
