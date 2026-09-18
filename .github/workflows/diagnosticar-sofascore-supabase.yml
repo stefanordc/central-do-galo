@@ -1,0 +1,16 @@
+name: Diagnosticar SofaScore via Supabase
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/diagnosticar-sofascore-supabase.yml"
+
+jobs:
+  teste:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Consultar funcao de teste
+        run: |
+          curl -sS -f             "https://lhrpsquyzehevxuogxar.supabase.co/functions/v1/sofascore-test"
