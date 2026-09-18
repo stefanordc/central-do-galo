@@ -29,7 +29,7 @@ jobs:
 
     strategy:
       fail-fast: false
-      max-parallel: 15
+      max-parallel: 3
       matrix:
         conta:
           - Atletico
@@ -85,4 +85,18 @@ jobs:
           google-chrome --version || chromium --version || true
 
       - name: Sincronizar perfil
-        run: python scripts/sincronizar_x.py --conta "${{ matrix.conta }}"
+        run: |
+          for tentativa in 1 2 3; do
+            echo "Tentativa ${tentativa}/3 para @${{ matrix.conta }}"
+            if python scripts/sincronizar_x.py --conta "${{ matrix.conta }}"; then
+              exit 0
+            fi
+
+            if [ "${tentativa}" -lt 3 ]; then
+              espera=$((tentativa * 20))
+              echo "Falhou. Aguardando ${espera}s antes de tentar novamente..."
+              sleep "${espera}"
+            fi
+          done
+
+          exit 1
