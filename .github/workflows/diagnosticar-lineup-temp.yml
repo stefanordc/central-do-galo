@@ -1,0 +1,50 @@
+name: Diagnosticar lineup SofaScore
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/diagnosticar-lineup-temp.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostico:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Consultar evento recente
+        run: |
+          python - <<'PY'
+          import json
+          from app.services.jogo_service import _sofascore_get, fechar_cliente_sofascore
+
+          try:
+              for endpoint in (
+                  "/event/16881450/lineups",
+                  "/event/16881450/statistics",
+              ):
+                  data = _sofascore_get(endpoint)
+                  print("ENDPOINT", endpoint)
+                  print(json.dumps(data, ensure_ascii=False)[:4000])
+          finally:
+              fechar_cliente_sofascore()
+          PY
