@@ -228,6 +228,7 @@ export default function AdminPage() {
   const [periodoAcessos, setPeriodoAcessos] = useState<PeriodoAcessos>("dia");
   const [acessosResumo, setAcessosResumo] = useState<AcessosResumo>(ACESSOS_VAZIO);
   const [carregandoAcessos, setCarregandoAcessos] = useState(false);
+  const [atualizandoDados, setAtualizandoDados] = useState(false);
 
   const [tituloPagina, setTituloPagina] = useState("");
   const [slugPagina, setSlugPagina] = useState("");
@@ -423,6 +424,50 @@ export default function AdminPage() {
       );
     } finally {
       setCarregandoAcessos(false);
+    }
+  }
+
+  async function atualizarDadosAgora() {
+    if (!token || atualizandoDados) return;
+
+    setAtualizandoDados(true);
+    setMensagem("Atualizando calendário e estatísticas...");
+
+    try {
+      const response = await fetch("/cron/dados", {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        cache: "no-store",
+      });
+
+      const body = await response.json().catch(() => ({}));
+
+      if (response.status === 401) {
+        sair();
+        return;
+      }
+
+      if (!response.ok) {
+        throw new Error(body.erros?.join("; ") || body.detail || "Falha na atualização.");
+      }
+
+      const salvas = Number(body.estatisticas_salvas ?? 0);
+      const atualizados = Number(body.jogos_atualizados ?? 0);
+      const pendentes = Number(body.pendentes_estatisticas ?? 0);
+
+      setMensagem(
+        `Dados atualizados. ${atualizados} jogo(s) revisado(s), ${salvas} estatística(s) salva(s) e ${pendentes} pendência(s) encontrada(s).`
+      );
+    } catch (error) {
+      setMensagem(
+        error instanceof Error
+          ? `Falha ao atualizar dados: ${error.message}`
+          : "Falha ao atualizar dados."
+      );
+    } finally {
+      setAtualizandoDados(false);
     }
   }
 
@@ -863,7 +908,15 @@ export default function AdminPage() {
           <h1>Painel administrativo</h1>
           <p>Gerencie o elenco, páginas públicas, perfis do Radar do X e canais do YouTube.</p>
         </div>
-        <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+        <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+          <button
+            className="admin-secondary-button"
+            type="button"
+            onClick={atualizarDadosAgora}
+            disabled={atualizandoDados}
+          >
+            {atualizandoDados ? "Atualizando dados..." : "Atualizar dados agora"}
+          </button>
           <button
             className="admin-secondary-button"
             type="button"
