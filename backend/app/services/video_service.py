@@ -18,6 +18,7 @@ from seleniumbase import Driver
 
 from app.core.config import get_settings
 from app.db.pool import pool
+from app.services.video_collector_store import remote_call as video_remote_call, remote_enabled as video_remote_enabled
 
 logger = logging.getLogger("central_galo.youtube")
 settings = get_settings()
@@ -204,6 +205,15 @@ def _atualizar_ultima_publicacao_tipo(
     tipo: str,
     data_publicacao: datetime,
 ) -> None:
+    if video_remote_enabled():
+        video_remote_call(
+            "update_last_publication",
+            fonte_id=str(fonte_id),
+            tipo=tipo,
+            data_publicacao=data_publicacao.astimezone(UTC).isoformat(),
+        )
+        return
+
     chave = f"ultima_publicacao_{tipo}"
 
     sql = """
@@ -447,6 +457,24 @@ def _desativar_videos_fora_do_filtro(
     if not termos_incluir and not termos_excluir:
         return 0
 
+    if video_remote_enabled():
+        resultado = video_remote_call("list_active_videos", fonte_id=str(fonte_id))
+        rows = resultado.get("data", [])
+        ids_desativar = [
+            str(item.get("id"))
+            for item in rows
+            if not _titulo_passa_no_filtro(
+                str(item.get("titulo") or ""),
+                termos_incluir,
+                termos_excluir,
+            )
+            and item.get("id")
+        ]
+        if not ids_desativar:
+            return 0
+        retorno = video_remote_call("deactivate_ids", ids=ids_desativar)
+        return int(retorno.get("count", 0))
+
     sql_select = """
         select id, titulo
         from public.videos
@@ -487,6 +515,10 @@ def _desativar_videos_fora_do_filtro(
 
 
 def listar_fontes_youtube() -> list[dict]:
+    if video_remote_enabled():
+        resultado = video_remote_call("list_sources")
+        return list(resultado.get("data", []))
+
     sql = """
         select id, nome, slug, url_base, confiabilidade, oficial, configuracao
         from public.fontes
@@ -516,6 +548,24 @@ def salvar_video(
 ) -> UUID:
     if tipo not in TIPOS_VALIDOS:
         tipo = "video"
+
+    if video_remote_enabled():
+        publicado_serializado = publicado_em.isoformat() if isinstance(publicado_em, datetime) else None
+        resultado = video_remote_call(
+            "save_video",
+            fonte_id=str(fonte_id),
+            item={
+                "video_id": video_id,
+                "titulo": titulo,
+                "url": url,
+                "thumbnail_url": thumbnail_url,
+                "descricao": descricao,
+                "tipo": tipo,
+                "publicado_em": publicado_serializado,
+                "metadados": metadados,
+            },
+        )
+        return UUID(str(resultado["id"]))
 
     sql = """
         insert into public.videos (
@@ -1337,6 +1387,10 @@ class YoutubePublicScraper:
 
 
 def _desativar_membros_antigos(fonte_id: UUID) -> int:
+    if video_remote_enabled():
+        resultado = video_remote_call("deactivate_members", fonte_id=str(fonte_id))
+        return int(resultado.get("count", 0))
+
     sql = """
         update public.videos
         set ativo = false
