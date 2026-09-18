@@ -1,8 +1,8 @@
 "use client";
 
 import { ClipboardEvent, FormEvent, useEffect, useMemo, useState } from "react";
+import { adminApiFetch } from "../../lib/adminApi";
 
-const API_URL = "";
 const ADMIN_EMAIL = "stefanobrunofaria@gmail.com";
 
 type PaginaAdmin = {
@@ -203,11 +203,11 @@ export default function AdminPage() {
   async function carregarDados() {
     const headers = { ...authHeaders };
     const [paginasResponse, contasResponse, canaisYoutubeResponse, capaResponse, elencoResponse] = await Promise.all([
-      fetch(`${API_URL}/api/admin/paginas`, { headers, cache: "no-store" }),
-      fetch(`${API_URL}/api/admin/x/contas`, { headers, cache: "no-store" }),
-      fetch(`${API_URL}/api/admin/youtube/canais`, { headers, cache: "no-store" }),
-      fetch(`${API_URL}/api/admin/capa`, { headers, cache: "no-store" }),
-      fetch(`${API_URL}/api/admin/elenco`, { headers, cache: "no-store" }),
+      adminApiFetch("/paginas", { headers, cache: "no-store" }),
+      adminApiFetch("/x/contas", { headers, cache: "no-store" }),
+      adminApiFetch("/youtube/canais", { headers, cache: "no-store" }),
+      adminApiFetch("/capa", { headers, cache: "no-store" }),
+      adminApiFetch("/elenco", { headers, cache: "no-store" }),
     ]);
 
     if (
@@ -240,7 +240,7 @@ export default function AdminPage() {
     setErroLogin(null);
 
     try {
-      const response = await fetch(`${API_URL}/api/admin/login`, {
+      const response = await adminApiFetch("/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, senha }),
@@ -272,7 +272,7 @@ export default function AdminPage() {
   async function criarPagina(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setMensagem(null);
-    const response = await fetch(`${API_URL}/api/admin/paginas`, {
+    const response = await adminApiFetch("/paginas", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders },
       body: JSON.stringify({
@@ -298,7 +298,7 @@ export default function AdminPage() {
   async function criarContaX(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setMensagem(null);
-    const response = await fetch(`${API_URL}/api/admin/x/contas`, {
+    const response = await adminApiFetch("/x/contas", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders },
       body: JSON.stringify({
@@ -325,7 +325,7 @@ export default function AdminPage() {
     event.preventDefault();
     setMensagem(null);
 
-    const response = await fetch(`${API_URL}/api/admin/youtube/canais`, {
+    const response = await adminApiFetch("/youtube/canais", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders },
       body: JSON.stringify({
@@ -468,7 +468,7 @@ export default function AdminPage() {
 
         try {
           const fotoDataUrl = await normalizarFotoExistente(jogador.foto_url!);
-          const response = await fetch(`${API_URL}/api/admin/elenco/${jogador.id}`, {
+          const response = await adminApiFetch(`/elenco/${jogador.id}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json", ...authHeaders },
             body: JSON.stringify({
@@ -547,10 +547,10 @@ export default function AdminPage() {
 
     try {
       const editando = Boolean(jogadorEditandoId);
-      const response = await fetch(
+      const response = await adminApiFetch(
         editando
-          ? `${API_URL}/api/admin/elenco/${jogadorEditandoId}`
-          : `${API_URL}/api/admin/elenco`,
+          ? `/elenco/${jogadorEditandoId}`
+          : "/elenco",
         {
           method: editando ? "PUT" : "POST",
           headers: { "Content-Type": "application/json", ...authHeaders },
@@ -588,7 +588,7 @@ export default function AdminPage() {
   async function excluirJogador(jogador: JogadorAdmin) {
     if (!window.confirm(`Remover ${jogador.nome_guerra} do elenco atual?`)) return;
 
-    const response = await fetch(`${API_URL}/api/admin/elenco/${jogador.id}`, {
+    const response = await adminApiFetch(`/elenco/${jogador.id}`, {
       method: "DELETE",
       headers: { ...authHeaders },
     });
@@ -608,7 +608,7 @@ export default function AdminPage() {
     event.preventDefault();
     setMensagem(null);
 
-    const response = await fetch(`${API_URL}/api/admin/capa`, {
+    const response = await adminApiFetch("/capa", {
       method: "PUT",
       headers: { "Content-Type": "application/json", ...authHeaders },
       body: JSON.stringify({
