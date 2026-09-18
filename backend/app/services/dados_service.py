@@ -923,6 +923,12 @@ def _agregar_individual(
 
         jogador_id = int(row["jogador_id"])
         label_info = labels.get(jogador_id, {})
+        minutos = _to_number(stats.get("minutesPlayed"))
+        # O lineup inclui reservas não utilizados. Só conta como jogo se
+        # o jogador realmente entrou em campo.
+        if minutos is None or minutos <= 0:
+            continue
+
         item = jogadores.setdefault(
             jogador_id,
             {
@@ -947,9 +953,7 @@ def _agregar_individual(
         if row.get("titular"):
             item["titular"] += 1
 
-        minutos = _to_number(stats.get("minutesPlayed"))
-        if minutos is not None:
-            item["minutos"] += minutos
+        item["minutos"] += minutos
 
         rating = _to_number(stats.get("rating"))
         if rating is not None:
