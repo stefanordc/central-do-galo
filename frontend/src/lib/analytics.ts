@@ -1,6 +1,23 @@
 import { publicApiFetch } from "./publicApi";
 
 const SESSION_KEY = "central_galo_access_session";
+const CLIENT_KEY = "central_galo_access_client";
+
+export function getAnalyticsClientId(): string {
+  if (typeof window === "undefined") return "";
+
+  const current = window.localStorage.getItem(CLIENT_KEY);
+  if (current) return current;
+
+  const next =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : "00000000-0000-4000-8000-" +
+        Math.random().toString(16).slice(2).padEnd(12, "0").slice(0, 12);
+
+  window.localStorage.setItem(CLIENT_KEY, next);
+  return next;
+}
 
 export function getAnalyticsSessionId(): string {
   if (typeof window === "undefined") return "";
@@ -36,6 +53,7 @@ export async function registrarCliqueAnalytics(params: {
     body: JSON.stringify({
       acao: "clique",
       sessao_id: getAnalyticsSessionId(),
+      cliente_id: getAnalyticsClientId(),
       caminho,
       tipo: params.tipo,
       referencia: params.referencia,
