@@ -18,11 +18,11 @@ from app.collectors.parser import (
     parse_sitemap_xml,
 )
 from app.collectors.rules import RULES, CollectorRule, get_rule
-from app.services.news_classifier import save_news_categories
-from app.services.news_service import (
+from app.services.news_collector_store import (
     atualizar_imagem_noticia_por_url,
     obter_fonte_por_slug,
     salvar_noticia,
+    save_news_categories,
     urls_ja_cadastradas,
     urls_sem_imagem,
 )
