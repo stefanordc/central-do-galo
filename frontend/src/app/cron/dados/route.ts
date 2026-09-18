@@ -204,7 +204,7 @@ function sofaPlayers(lineups: JsonObject, lado: "home" | "away"): JsonObject[] {
         estatisticas: item?.statistics ?? {},
       };
     })
-    .filter((item): item is JsonObject => item !== null);
+    .filter((item: JsonObject | null): item is JsonObject => item !== null);
 }
 
 function statMap(teamBlock: JsonObject): Map<string, unknown> {
@@ -354,7 +354,7 @@ function apiFootballPlayers(playersResponse: JsonObject[], fixture: JsonObject):
         estatisticas,
       };
     })
-    .filter((item): item is JsonObject => item !== null);
+    .filter((item: JsonObject | null): item is JsonObject => item !== null);
 }
 
 async function saveStats(
