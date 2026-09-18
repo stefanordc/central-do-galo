@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
     app_host: str = "127.0.0.1"
     app_port: int = 8000
+    cron_secret: str | None = None
 
     db_host: str
     db_port: int = 5432
