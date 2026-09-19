@@ -272,12 +272,18 @@ def main() -> None:
     )
     parser.add_argument("--ano", type=int, default=datetime.now().year)
     parser.add_argument("--recent-days", type=int, default=4)
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        help="Reprocessa todos os jogos oficiais finalizados da temporada.",
+    )
     args = parser.parse_args()
 
     jogos_resp = remote_call(
         "list_games",
         temporada=args.ano,
         recent_days=args.recent_days,
+        force_all=args.full,
     )
     jogos = jogos_resp.get("data") or []
 
