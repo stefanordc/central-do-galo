@@ -59,4 +59,4 @@ jobs:
           google-chrome --version || chromium --version || true
 
       - name: Sincronizar estatísticas
-        run: python scripts/sincronizar_estatisticas_sofascore_remote.py --ano 2026 --recent-days 4
+        run: python scripts/sincronizar_estatisticas_sofascore_remote.py --ano 2026 --recent-days 4 --full
