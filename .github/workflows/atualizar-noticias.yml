@@ -51,4 +51,4 @@ jobs:
           pip install -r requirements-news.txt
 
       - name: Coletar noticias
-        run: python scripts/coletar_noticias.py --delay 0.2
+        run: python scripts/coletar_noticias.py --delay 0.2 --strict
