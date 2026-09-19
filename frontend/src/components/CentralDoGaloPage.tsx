@@ -739,7 +739,13 @@ function VideoCard({ video, onPlay }: { video: VideoYoutube; onPlay: (video: Vid
   const liveAgora = liveLabel === "AO VIVO";
 
   return (
-    <article className={`youtube-card youtube-card-${video.tipo}`}>
+    <article
+      className={[
+        "youtube-card",
+        `youtube-card-${video.tipo}`,
+        liveAgora ? "youtube-card-live-now" : "",
+      ].filter(Boolean).join(" ")}
+    >
       <button
         className="youtube-card-play"
         type="button"
@@ -782,6 +788,24 @@ function VideoShelf({
 }) {
   if (items.length === 0) return null;
 
+  const livesAgora =
+    variant === "live"
+      ? items.filter(
+          (video) =>
+            typeof video.metadados.live_status === "string" &&
+            video.metadados.live_status === "is_live"
+        )
+      : [];
+
+  const outrosItens =
+    variant === "live"
+      ? items.filter(
+          (video) =>
+            typeof video.metadados.live_status !== "string" ||
+            video.metadados.live_status !== "is_live"
+        )
+      : items;
+
   return (
     <section className={`youtube-shelf youtube-shelf-${variant}`}>
       <div className="youtube-shelf-heading">
@@ -791,9 +815,38 @@ function VideoShelf({
         </div>
         <span>{items.length} publicações</span>
       </div>
-      <div className={`youtube-grid youtube-grid-${variant}`}>
-        {items.map((video) => <VideoCard video={video} onPlay={onPlay} key={video.id} />)}
-      </div>
+
+      {variant === "live" && livesAgora.length > 0 && (
+        <div className="youtube-live-now-spotlight" aria-label="Transmissões ao vivo agora">
+          <div className="youtube-live-now-heading">
+            <span className="youtube-live-now-dot" aria-hidden="true" />
+            <div>
+              <strong>AO VIVO AGORA</strong>
+              <span>Transmissões acontecendo neste momento.</span>
+            </div>
+          </div>
+
+          <div className="youtube-live-now-grid">
+            {livesAgora.map((video) => (
+              <VideoCard video={video} onPlay={onPlay} key={video.id} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {variant === "live" && outrosItens.length > 0 && livesAgora.length > 0 && (
+        <div className="youtube-live-secondary-heading">
+          <strong>Próximas transmissões e histórico recente</strong>
+        </div>
+      )}
+
+      {outrosItens.length > 0 && (
+        <div className={`youtube-grid youtube-grid-${variant}`}>
+          {outrosItens.map((video) => (
+            <VideoCard video={video} onPlay={onPlay} key={video.id} />
+          ))}
+        </div>
+      )}
     </section>
   );
 }
