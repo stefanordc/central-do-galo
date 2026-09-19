@@ -85,6 +85,10 @@ jobs:
               if r.ok:
                   detail = r.json()
                   print("DETAIL_KEYS", list(detail.keys())[:30])
-                  print("DETAIL_SAMPLE", json.dumps(detail, ensure_ascii=False)[:18000])
+                  content = detail.get("content") or {}
+                  print("CONTENT_KEYS", list(content.keys())[:50])
+                  lineup = content.get("lineup")
+                  print("LINEUP_TYPE", type(lineup).__name__)
+                  print("LINEUP_JSON", json.dumps(lineup, ensure_ascii=False)[:30000])
                   break
           PY
