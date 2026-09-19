@@ -106,9 +106,15 @@ def _same_team(a: object, b: object) -> bool:
     aliases = {
         "athletico": "athletico paranaense",
         "atletico pr": "athletico paranaense",
+        "athletico pr": "athletico paranaense",
         "atletico paranaense": "athletico paranaense",
+        "athletico paranaense": "athletico paranaense",
         "atletico mg": "atletico mineiro",
         "atletico mineiro": "atletico mineiro",
+        "america mineiro": "america mg",
+        "america mg": "america mg",
+        "rb bragantino": "red bull bragantino",
+        "red bull bragantino": "red bull bragantino",
     }
     return aliases.get(aa, aa) == aliases.get(bb, bb)
 
