@@ -168,13 +168,12 @@ RULES: dict[str, CollectorRule] = {
             re.IGNORECASE,
         ),
         required_title_pattern=re.compile(r"\b(atl[eé]tico(?:-mg)?|galo)\b", re.IGNORECASE),
-        json_urls=(
-            "https://site.api.espn.com/apis/site/v2/sports/soccer/bra.1/teams/7632/news?lang=pt&region=br&limit=50",
-            "https://site.api.espn.com/apis/site/v2/sports/soccer/bra.1/news?lang=pt&region=br&limit=50",
-            "https://site.api.espn.com/apis/site/v2/sports/soccer/bra.copa_do_brazil/news?lang=pt&region=br&limit=50",
-            "https://site.api.espn.com/apis/site/v2/sports/soccer/conmebol.sudamericana/news?lang=pt&region=br&limit=50",
+        feed_urls=(
+            "https://news.google.com/rss/search?q=site%3Aespn.com.br+%22Atl%C3%A9tico-MG%22&hl=pt-BR&gl=BR&ceid=BR%3Apt-419",
+            "https://news.google.com/rss/search?q=site%3Aespn.com.br+Galo&hl=pt-BR&gl=BR&ceid=BR%3Apt-419",
         ),
-        json_team_ids=("7632",),
+        feed_proxy_pattern=re.compile(r"^https://news\.google\.com/", re.IGNORECASE),
+        prefer_feed=True,
     ),
 }
 
