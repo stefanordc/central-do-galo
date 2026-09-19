@@ -70,6 +70,7 @@ def _candidate_allowed(
     rule: CollectorRule,
     *,
     allow_feed_proxy: bool = False,
+    skip_required_title: bool = False,
 ) -> bool:
     if rule.blocked_url_pattern and rule.blocked_url_pattern.search(url):
         return False
@@ -85,7 +86,11 @@ def _candidate_allowed(
     if not matches_article and not matches_proxy:
         return False
 
-    if rule.required_title_pattern and not rule.required_title_pattern.search(title):
+    if (
+        rule.required_title_pattern
+        and not skip_required_title
+        and not rule.required_title_pattern.search(title)
+    ):
         return False
     return True
 
@@ -195,6 +200,125 @@ def extract_candidates(
 
 
 
+
+
+def parse_json_news(
+    content: bytes | str,
+    rule: CollectorRule,
+    *,
+    api_url: str,
+    discovered_by: str = "json-api",
+) -> list[ArticleCandidate]:
+    try:
+        payload = json.loads(content)
+    except (json.JSONDecodeError, TypeError, UnicodeDecodeError):
+        return []
+
+    if not isinstance(payload, dict):
+        return []
+
+    articles = payload.get("articles")
+    if not isinstance(articles, list):
+        return []
+
+    required_team_ids = {str(value) for value in rule.json_team_ids}
+    by_url: dict[str, ArticleCandidate] = {}
+
+    for item in articles:
+        if not isinstance(item, dict):
+            continue
+
+        title = clean_text(str(item.get("headline") or item.get("title") or ""))
+        summary = clean_text(str(item.get("description") or item.get("summary") or ""))
+
+        links = item.get("links")
+        raw_url = None
+        if isinstance(links, dict):
+            raw_url = _json_value_as_url(links.get("web"))
+            if not raw_url:
+                raw_url = _json_value_as_url(links.get("mobile"))
+            if not raw_url:
+                raw_url = _json_value_as_url(links)
+
+        if not raw_url:
+            raw_url = _json_value_as_url(item.get("link"))
+        if not raw_url:
+            raw_url = _json_value_as_url(item.get("url"))
+        if not raw_url:
+            continue
+
+        try:
+            url = canonicalize_url(urljoin(api_url, raw_url))
+        except Exception:
+            continue
+
+        title = title or _title_from_url(url)
+
+        team_match = False
+        categories = item.get("categories")
+        if required_team_ids and isinstance(categories, list):
+            for category in categories:
+                if not isinstance(category, dict):
+                    continue
+                if str(category.get("type") or "").lower() != "team":
+                    continue
+                team_id = category.get("teamId") or category.get("id")
+                if team_id is not None and str(team_id) in required_team_ids:
+                    team_match = True
+                    break
+
+        match_text = clean_text(f"{title} {summary}")
+        if required_team_ids and not team_match:
+            if not (
+                rule.required_title_pattern
+                and rule.required_title_pattern.search(match_text)
+            ):
+                continue
+
+        if not _candidate_allowed(
+            match_text,
+            url,
+            rule,
+            skip_required_title=team_match,
+        ):
+            continue
+
+        image_url = None
+        images = item.get("images")
+        if isinstance(images, list):
+            preferred = None
+            for image in images:
+                if not isinstance(image, dict):
+                    continue
+                candidate_url = clean_text(str(image.get("url") or ""))
+                if not candidate_url:
+                    continue
+                if preferred is None:
+                    preferred = candidate_url
+                if str(image.get("type") or "").lower() == "header":
+                    preferred = candidate_url
+                    break
+            image_url = preferred
+
+        published = _parse_datetime(item.get("published"))
+        if published is None:
+            published = _parse_datetime(item.get("lastModified"))
+        if published is None:
+            published = _date_from_url(url)
+
+        by_url[url] = ArticleCandidate(
+            titulo=title,
+            url=url,
+            publicado_em=published,
+            descoberta_por=discovered_by,
+            resumo=summary or None,
+            imagem_url=image_url,
+        )
+
+    candidates = list(by_url.values())
+    if rule.recent_limit is not None:
+        candidates = candidates[: rule.recent_limit]
+    return candidates
 
 def _html_fragment_image(fragment: str) -> str | None:
     if not fragment:
