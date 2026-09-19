@@ -239,3 +239,86 @@ def test_espn_aceita_artigos_em_diferentes_editorias() -> None:
         "Galo busca vaga na Copa do Brasil",
     }
 
+def test_parse_espn_json_news_filtra_atletico_por_categoria() -> None:
+    from app.collectors.parser import parse_json_news
+
+    payload = """
+    {
+      "articles": [
+        {
+          "id": "17271374",
+          "headline": "Atlético-MG x Chapecoense: onde assistir ao vivo",
+          "description": "O Galo entra em campo pelo Brasileirão.",
+          "published": "2026-09-18T18:00:00Z",
+          "images": [
+            {"type": "header", "url": "https://a.espncdn.com/photo/galo.jpg"}
+          ],
+          "categories": [
+            {"type": "team", "teamId": 7632, "description": "Atlético-MG"}
+          ],
+          "links": {
+            "web": {
+              "href": "https://www.espn.com.br/futebol/brasileirao/artigo/_/id/17271374/atletico-mg-x-chapecoense"
+            }
+          }
+        },
+        {
+          "id": "17270000",
+          "headline": "Flamengo prepara novidades para a rodada",
+          "description": "Notícia de outro clube.",
+          "categories": [
+            {"type": "team", "teamId": 819, "description": "Flamengo"}
+          ],
+          "links": {
+            "web": {
+              "href": "https://www.espn.com.br/futebol/brasileirao/artigo/_/id/17270000/flamengo-prepara-novidades"
+            }
+          }
+        }
+      ]
+    }
+    """
+
+    result = parse_json_news(
+        payload,
+        get_rule("espn-atletico-mg"),
+        api_url="https://site.api.espn.com/apis/site/v2/sports/soccer/bra.1/news",
+    )
+
+    assert len(result) == 1
+    assert result[0].titulo == "Atlético-MG x Chapecoense: onde assistir ao vivo"
+    assert result[0].imagem_url == "https://a.espncdn.com/photo/galo.jpg"
+    assert result[0].publicado_em is not None
+
+
+def test_parse_espn_json_news_aceita_categoria_mesmo_sem_nome_no_titulo() -> None:
+    from app.collectors.parser import parse_json_news
+
+    payload = """
+    {
+      "articles": [
+        {
+          "headline": "Renan Lodi revela bastidores após classificação",
+          "description": "Lateral do time mineiro falou depois da partida.",
+          "categories": [
+            {"type": "team", "teamId": 7632, "description": "Atlético-MG"}
+          ],
+          "links": {
+            "web": {
+              "href": "https://www.espn.com.br/futebol/atletico-mg/artigo/_/id/17269531/renan-lodi-revela-bastidores"
+            }
+          }
+        }
+      ]
+    }
+    """
+
+    result = parse_json_news(
+        payload,
+        get_rule("espn-atletico-mg"),
+        api_url="https://site.api.espn.com/apis/site/v2/sports/soccer/bra.1/news",
+    )
+
+    assert len(result) == 1
+    assert result[0].titulo == "Renan Lodi revela bastidores após classificação"
+
