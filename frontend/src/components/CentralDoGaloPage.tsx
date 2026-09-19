@@ -1083,6 +1083,30 @@ export default function CentralDoGaloPage({
         return blocos
           .flat()
           .sort((a, b) => {
+            if (tipo === "live") {
+              const prioridadeLive: Record<string, number> = {
+                is_live: 0,
+                is_upcoming: 1,
+                was_live: 2,
+              };
+
+              const statusA =
+                typeof a.metadados.live_status === "string"
+                  ? a.metadados.live_status
+                  : "";
+              const statusB =
+                typeof b.metadados.live_status === "string"
+                  ? b.metadados.live_status
+                  : "";
+
+              const prioridadeA = prioridadeLive[statusA] ?? 3;
+              const prioridadeB = prioridadeLive[statusB] ?? 3;
+
+              if (prioridadeA !== prioridadeB) {
+                return prioridadeA - prioridadeB;
+              }
+            }
+
             const dataA = new Date(a.publicado_em ?? a.coletado_em).getTime();
             const dataB = new Date(b.publicado_em ?? b.coletado_em).getTime();
             return dataB - dataA;
