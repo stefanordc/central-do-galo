@@ -80,6 +80,9 @@ def _invalidar_video_feed_cache() -> None:
 LIVE_STATUS_CACHE_TTL_SECONDS = 60.0
 _LIVE_STATUS_CACHE: dict[str, tuple[float, str | None]] = {}
 
+CHANNEL_LIVE_CACHE_TTL_SECONDS = 45.0
+_CHANNEL_LIVE_CACHE: dict[str, tuple[float, dict[str, Any] | None]] = {}
+
 
 def _extrair_objeto_json_html(html: str, marcador: str) -> dict[str, Any] | None:
     indice_marcador = html.find(marcador)
@@ -346,6 +349,130 @@ def _consultar_status_live_atual(video_id: str) -> str | None:
     return status_atual
 
 
+
+def _consultar_live_atual_canal(fonte: dict[str, Any]) -> dict[str, Any] | None:
+    slug = str(fonte.get("slug") or "").strip()
+    config = fonte.get("configuracao")
+    if not isinstance(config, dict):
+        config = {}
+
+    handle = str(config.get("handle") or "").strip()
+    url_base = str(fonte.get("url_base") or "").strip().rstrip("/")
+
+    if handle:
+        live_url = f"https://www.youtube.com/{handle}/live"
+    elif url_base:
+        live_url = f"{url_base}/live"
+    else:
+        return None
+
+    chave_cache = slug or live_url
+    agora_monotonic = time.monotonic()
+    cache = _CHANNEL_LIVE_CACHE.get(chave_cache)
+    if cache and agora_monotonic - cache[0] < CHANNEL_LIVE_CACHE_TTL_SECONDS:
+        return cache[1]
+
+    request = Request(
+        live_url,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/152.0.0.0 Safari/537.36"
+            ),
+            "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+        },
+    )
+
+    item: dict[str, Any] | None = None
+
+    try:
+        with urlopen(request, timeout=5) as response:
+            html = response.read().decode("utf-8", errors="ignore")
+
+        player = _extrair_objeto_json_html(html, "ytInitialPlayerResponse")
+        if not isinstance(player, dict):
+            _CHANNEL_LIVE_CACHE[chave_cache] = (agora_monotonic, None)
+            return None
+
+        if _status_live_player_response(player) != "is_live":
+            _CHANNEL_LIVE_CACHE[chave_cache] = (agora_monotonic, None)
+            return None
+
+        video_details = player.get("videoDetails")
+        if not isinstance(video_details, dict):
+            video_details = {}
+
+        video_id = str(video_details.get("videoId") or "").strip()
+        titulo = str(video_details.get("title") or "").strip()
+
+        if not video_id or not titulo:
+            _CHANNEL_LIVE_CACHE[chave_cache] = (agora_monotonic, None)
+            return None
+
+        thumbnail_url = None
+        thumbnail = video_details.get("thumbnail")
+        if isinstance(thumbnail, dict):
+            thumbnails = thumbnail.get("thumbnails")
+            if isinstance(thumbnails, list):
+                urls = [
+                    str(valor.get("url") or "").strip()
+                    for valor in thumbnails
+                    if isinstance(valor, dict) and str(valor.get("url") or "").strip()
+                ]
+                if urls:
+                    thumbnail_url = urls[-1]
+
+        publicado_em = None
+        microformat = player.get("microformat")
+        if isinstance(microformat, dict):
+            renderer = microformat.get("playerMicroformatRenderer")
+            if isinstance(renderer, dict):
+                live_details = renderer.get("liveBroadcastDetails")
+                if isinstance(live_details, dict):
+                    inicio_texto = live_details.get("startTimestamp")
+                    if isinstance(inicio_texto, str) and inicio_texto:
+                        try:
+                            publicado_em = datetime.fromisoformat(
+                                inicio_texto.replace("Z", "+00:00")
+                            )
+                        except ValueError:
+                            publicado_em = None
+
+        agora = datetime.now(UTC)
+        item = {
+            "video_id": video_id,
+            "titulo": titulo,
+            "url": f"https://www.youtube.com/watch?v={video_id}",
+            "thumbnail_url": thumbnail_url or f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg",
+            "descricao": str(video_details.get("shortDescription") or "").strip() or None,
+            "tipo": "live",
+            "publicado_em": publicado_em,
+            "coletado_em": agora,
+            "metadados": {
+                "plataforma": "youtube",
+                "origem": "youtube_channel_live_realtime",
+                "publico": True,
+                "ordem_na_aba": 0,
+                "duration_text": "AO VIVO",
+                "metadata_text": "Ao vivo agora",
+                "embed_url": f"https://www.youtube.com/embed/{video_id}",
+                "url_extraida": live_url,
+                "live_status": "is_live",
+                "live_status_verificado_em": agora.isoformat(),
+            },
+        }
+    except Exception as exc:
+        logger.debug(
+            "[YouTube] não foi possível descobrir a live atual de %s: %s",
+            slug or live_url,
+            exc,
+        )
+
+    _CHANNEL_LIVE_CACHE[chave_cache] = (agora_monotonic, item)
+    return item
+
+
 def _atualizar_status_lives(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not rows:
         return rows
@@ -561,6 +688,104 @@ def listar_fontes_youtube() -> list[dict]:
             return [dict(zip(columns, row, strict=True)) for row in cur.fetchall()]
 
 
+
+def _obter_fonte_youtube_local(slug: str) -> dict[str, Any] | None:
+    sql = """
+        select id, nome, slug, url_base, oficial, configuracao
+        from public.fontes
+        where ativo = true
+          and tipo = 'youtube'
+          and slug = %s
+        limit 1
+    """
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (slug,))
+            row = cur.fetchone()
+            if not row:
+                return None
+            columns = [desc.name for desc in cur.description]
+            return dict(zip(columns, row, strict=True))
+
+
+def _salvar_live_tempo_real(
+    fonte: dict[str, Any],
+    item: dict[str, Any],
+) -> dict[str, Any]:
+    metadados = item.get("metadados")
+    if not isinstance(metadados, dict):
+        metadados = {}
+
+    sql = """
+        insert into public.videos (
+            fonte_id,
+            video_id,
+            titulo,
+            url,
+            thumbnail_url,
+            descricao,
+            tipo,
+            publicado_em,
+            coletado_em,
+            metadados,
+            ativo
+        )
+        values (%s, %s, %s, %s, %s, %s, 'live', %s, now(), %s::jsonb, true)
+        on conflict (video_id) do update
+        set fonte_id = excluded.fonte_id,
+            titulo = excluded.titulo,
+            url = excluded.url,
+            thumbnail_url = coalesce(excluded.thumbnail_url, public.videos.thumbnail_url),
+            descricao = coalesce(excluded.descricao, public.videos.descricao),
+            tipo = 'live',
+            publicado_em = coalesce(excluded.publicado_em, public.videos.publicado_em),
+            coletado_em = now(),
+            metadados = coalesce(public.videos.metadados, '{}'::jsonb) || excluded.metadados,
+            ativo = true
+        returning
+            id,
+            video_id,
+            titulo,
+            url,
+            thumbnail_url,
+            descricao,
+            tipo,
+            publicado_em,
+            coletado_em,
+            metadados
+    """
+
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                sql,
+                (
+                    fonte["id"],
+                    item["video_id"],
+                    item["titulo"],
+                    item["url"],
+                    item.get("thumbnail_url"),
+                    item.get("descricao"),
+                    item.get("publicado_em"),
+                    json.dumps(metadados, ensure_ascii=False),
+                ),
+            )
+            row = cur.fetchone()
+            columns = [desc.name for desc in cur.description]
+        conn.commit()
+
+    salvo = dict(zip(columns, row, strict=True))
+    salvo.update(
+        {
+            "fonte_id": fonte["id"],
+            "fonte_nome": fonte["nome"],
+            "fonte_slug": fonte["slug"],
+            "fonte_oficial": bool(fonte["oficial"]),
+        }
+    )
+    return salvo
+
+
 def salvar_video(
     *,
     fonte_id: UUID,
@@ -716,7 +941,64 @@ def listar_videos(
             columns = [desc.name for desc in cur.description]
             rows = [dict(zip(columns, row, strict=True)) for row in cur.fetchall()]
 
-    return [_serializar_video(row) for row in rows]
+    itens = [_serializar_video(row) for row in rows]
+
+    if tipo == "live":
+        itens = _atualizar_status_lives(itens)
+
+        if fonte and offset == 0:
+            fonte_data = _obter_fonte_youtube_local(fonte)
+            if fonte_data:
+                live_atual = _consultar_live_atual_canal(fonte_data)
+                if live_atual:
+                    try:
+                        live_salva = _serializar_video(
+                            _salvar_live_tempo_real(fonte_data, live_atual)
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "[YouTube] live atual encontrada em %s, mas não foi possível persistir: %s",
+                            fonte,
+                            exc,
+                        )
+                        live_salva = {
+                            **live_atual,
+                            "id": f"live-now:{live_atual['video_id']}",
+                            "fonte_id": str(fonte_data["id"]),
+                            "fonte_nome": fonte_data["nome"],
+                            "fonte_slug": fonte_data["slug"],
+                            "fonte_oficial": bool(fonte_data["oficial"]),
+                        }
+                        live_salva = _serializar_video(live_salva)
+
+                    itens = [
+                        item
+                        for item in itens
+                        if str(item.get("video_id") or "") != str(live_salva.get("video_id") or "")
+                    ]
+                    itens.insert(0, live_salva)
+
+        prioridade = {
+            "is_live": 0,
+            "is_upcoming": 1,
+            "was_live": 2,
+        }
+
+        def chave_live(item: dict[str, Any]) -> tuple[int, float]:
+            status = str((item.get("metadados") or {}).get("live_status") or "")
+            data_texto = str(item.get("publicado_em") or item.get("coletado_em") or "")
+            try:
+                timestamp = datetime.fromisoformat(
+                    data_texto.replace("Z", "+00:00")
+                ).timestamp()
+            except ValueError:
+                timestamp = 0.0
+            return (prioridade.get(status, 3), -timestamp)
+
+        itens.sort(key=chave_live)
+        itens = itens[:limit]
+
+    return itens
 
 
 def listar_feed_videos_cacheado(*, limit_por_canal: int = 13) -> dict[str, Any]:
@@ -1468,8 +1750,6 @@ def sincronizar_youtube(fonte_slug: str | None = None) -> dict:
             "erros": [],
         }
 
-        ids_encontrados_na_aba_videos: set[str] = set()
-
         # IMPORTANTE:
         # cada canal usa uma sessão Selenium própria.
         # Isso impede que cards/DOM do canal anterior sejam reaproveitados.
@@ -1558,20 +1838,6 @@ def sincronizar_youtube(fonte_slug: str | None = None) -> dict:
                     tipo,
                     items,
                 )
-
-                if tipo == "video":
-                    ids_encontrados_na_aba_videos.update(
-                        str(item.get("video_id") or "")
-                        for item in items
-                        if item.get("video_id")
-                    )
-
-                if tipo == "live" and ids_encontrados_na_aba_videos:
-                    items = [
-                        item
-                        for item in items
-                        if str(item.get("video_id") or "") not in ids_encontrados_na_aba_videos
-                    ]
 
                 for item in items:
                     salvar_video(fonte_id=fonte["id"], **item)
