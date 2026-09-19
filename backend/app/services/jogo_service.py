@@ -195,6 +195,7 @@ class SofaScoreBrowserClient:
                 "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
                 "Referer": "https://www.sofascore.com/",
                 "Origin": "https://www.sofascore.com",
+                "X-Requested-With": "XMLHttpRequest",
             }
         )
 
@@ -217,7 +218,10 @@ class SofaScoreBrowserClient:
         js = """
         const callback = arguments[arguments.length - 1];
         fetch(arguments[0], {
-            headers: {'Accept': 'application/json, text/plain, */*'},
+            headers: {
+                'Accept': 'application/json, text/plain, */*',
+                'X-Requested-With': 'XMLHttpRequest'
+            },
             credentials: 'include',
             mode: 'cors'
         })
