@@ -92,6 +92,8 @@ RULES: dict[str, CollectorRule] = {
             r"falagalo\s*-\s*atl[eé]tico mineiro\s*-\s*galo\s*-\s*not[ií]cias\s*-\s*tudo sobre o galo)$",
             re.IGNORECASE,
         ),
+        feed_urls=("https://falagalo.com.br/feed/",),
+        prefer_feed=True,
         recent_pages=3,
         history_page_templates=("https://falagalo.com.br/category/noticias/page/{page}/",),
     ),
@@ -160,7 +162,7 @@ RULES: dict[str, CollectorRule] = {
         slug="espn-atletico-mg",
         listing_url="https://www.espn.com.br/futebol/time/_/id/7632/bra.atltico-mg",
         article_pattern=re.compile(
-            r"^https://www\.espn\.com\.br/futebol/(?:atletico-mg/)?artigo/_/id/\d+/[^?#]+$",
+            r"^https://www\.espn\.com\.br/futebol/(?:[a-z0-9-]+/)*artigo/_/id/\d+(?:/[^?#]+)?$",
             re.IGNORECASE,
         ),
         required_title_pattern=re.compile(r"\b(atl[eé]tico(?:-mg)?|galo)\b", re.IGNORECASE),
