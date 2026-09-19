@@ -159,10 +159,10 @@ class NewsCollectorRunner:
                 result.erros += 1
                 continue
 
-            # Feeds já entregam título, URL, data e resumo. Não abrimos cada
-            # matéria novamente só para enriquecer os metadados, evitando carga
-            # desnecessária e bloqueios 403 em sites que oferecem RSS.
-            if candidate.descoberta_por.startswith("feed"):
+            # Feeds e APIs estruturadas já entregam título, URL, data, resumo
+            # e, quando disponível, imagem. Não abrimos cada matéria novamente
+            # só para enriquecer metadados, evitando carga e bloqueios anti-bot.
+            if candidate.descoberta_por.startswith(("feed", "json-api")):
                 if self.delay_seconds:
                     time.sleep(self.delay_seconds)
                 continue
