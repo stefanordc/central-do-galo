@@ -1814,6 +1814,93 @@ button {
   grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
+.youtube-live-now-spotlight {
+  margin-bottom: 30px;
+  padding: 18px;
+  border: 2px solid var(--gold);
+  border-radius: 20px;
+  background: #0b0b0b;
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.16);
+}
+
+.youtube-live-now-heading {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin-bottom: 16px;
+  color: #ffffff;
+}
+
+.youtube-live-now-heading > div {
+  display: grid;
+  gap: 2px;
+}
+
+.youtube-live-now-heading strong {
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 950;
+  letter-spacing: 0.1em;
+}
+
+.youtube-live-now-heading span:not(.youtube-live-now-dot) {
+  color: #b9b9b9;
+  font-size: 11px;
+}
+
+.youtube-live-now-dot {
+  width: 11px;
+  height: 11px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #d3aa35;
+  box-shadow: 0 0 0 0 rgba(211, 170, 53, 0.55);
+  animation: youtube-live-now-pulse 1.5s ease-out infinite;
+}
+
+.youtube-live-now-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  gap: 20px;
+}
+
+.youtube-live-now-spotlight .youtube-card-copy strong {
+  color: #ffffff;
+}
+
+.youtube-live-now-spotlight .youtube-card-copy > span,
+.youtube-live-now-spotlight .youtube-card-copy time {
+  color: #b9b9b9;
+}
+
+.youtube-card-live-now .youtube-thumb-wrap {
+  border: 2px solid var(--gold);
+  box-shadow: 0 0 0 3px rgba(211, 170, 53, 0.12);
+}
+
+.youtube-card-live-now .youtube-play-mark {
+  border-color: var(--gold);
+}
+
+.youtube-live-secondary-heading {
+  margin: 4px 0 16px;
+  padding-top: 2px;
+  color: #202020;
+  font-size: 12px;
+}
+
+@keyframes youtube-live-now-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(211, 170, 53, 0.55);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(211, 170, 53, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(211, 170, 53, 0);
+  }
+}
+
 .youtube-card {
   min-width: 0;
 }
@@ -1956,7 +2043,7 @@ button {
   right: 22px;
   bottom: 22px;
   z-index: 2000;
-  width: min(420px, calc(100vw - 28px));
+  width: min(400px, calc(100vw - 28px));
   margin: 0;
   border-color: #3a3a3a;
   border-radius: 14px;
