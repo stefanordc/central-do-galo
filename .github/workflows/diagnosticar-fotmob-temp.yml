@@ -1,0 +1,90 @@
+name: Diagnosticar FotMob temporariamente
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/diagnosticar-fotmob-temp.yml"
+
+jobs:
+  diagnostico:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - name: Testar FotMob
+        run: |
+          python - <<'PY'
+          import json
+          import requests
+
+          headers = {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/153.0.0.0 Safari/537.36",
+              "Accept": "application/json, text/plain, */*",
+              "Referer": "https://www.fotmob.com/",
+          }
+
+          candidates = [
+              "https://www.fotmob.com/api/data/teams?id=10272&ccode3=BRA",
+              "https://www.fotmob.com/api/teams?id=10272&ccode3=BRA",
+          ]
+
+          team = None
+          for url in candidates:
+              r = requests.get(url, headers=headers, timeout=30)
+              print("TEAM_URL", url, "STATUS", r.status_code, "LEN", len(r.text))
+              if r.ok:
+                  team = r.json()
+                  print("TEAM_KEYS", list(team.keys())[:30])
+                  break
+
+          if not team:
+              raise SystemExit("Nenhum endpoint de time respondeu.")
+
+          print("TEAM_JSON_SAMPLE", json.dumps(team, ensure_ascii=False)[:12000])
+
+          matches = []
+          def walk(obj):
+              if isinstance(obj, dict):
+                  if "id" in obj and ("home" in obj or "away" in obj) and ("status" in obj or "time" in obj):
+                      matches.append(obj)
+                  for value in obj.values():
+                      walk(value)
+              elif isinstance(obj, list):
+                  for value in obj:
+                      walk(value)
+          walk(team)
+
+          print("MATCH_CANDIDATES", len(matches))
+          for m in matches[-10:]:
+              print("MATCH", json.dumps(m, ensure_ascii=False)[:2500])
+
+          match_id = None
+          # procura um jogo finalizado recente do Atlético
+          for m in reversed(matches):
+              mid = m.get("id")
+              if mid:
+                  match_id = mid
+                  break
+
+          if not match_id:
+              print("NO_MATCH_ID")
+              raise SystemExit(0)
+
+          detail_urls = [
+              f"https://www.fotmob.com/api/data/matchDetails?matchId={match_id}",
+              f"https://www.fotmob.com/api/matchDetails?matchId={match_id}",
+          ]
+          for url in detail_urls:
+              r = requests.get(url, headers=headers, timeout=30)
+              print("DETAIL_URL", url, "STATUS", r.status_code, "LEN", len(r.text))
+              if r.ok:
+                  detail = r.json()
+                  print("DETAIL_KEYS", list(detail.keys())[:30])
+                  print("DETAIL_SAMPLE", json.dumps(detail, ensure_ascii=False)[:18000])
+                  break
+          PY
