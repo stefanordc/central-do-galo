@@ -88,7 +88,9 @@ jobs:
                   content = detail.get("content") or {}
                   print("CONTENT_KEYS", list(content.keys())[:50])
                   lineup = content.get("lineup")
+                  player_stats = content.get("playerStats")
                   print("LINEUP_TYPE", type(lineup).__name__)
-                  print("LINEUP_JSON", json.dumps(lineup, ensure_ascii=False)[:30000])
+                  print("PLAYER_STATS_TYPE", type(player_stats).__name__)
+                  print("PLAYER_STATS_JSON", json.dumps(player_stats, ensure_ascii=False)[:40000])
                   break
           PY
