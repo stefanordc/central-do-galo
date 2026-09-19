@@ -33,6 +33,14 @@ def main() -> None:
         action="store_true",
         help="Também percorre sitemaps. Pode descobrir um volume muito maior de URLs.",
     )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help=(
+            "Retorna código de erro se alguma fonte tiver erro ou, no modo recente, "
+            "não encontrar nenhum candidato."
+        ),
+    )
     args = parser.parse_args()
 
     usar_store_remoto = bool((os.getenv("NEWS_REMOTE_STORE_URL") or "").strip())
@@ -62,8 +70,10 @@ def main() -> None:
 
         modo = "HISTÓRICO" if args.historico else "RECENTE"
         print(f"\n=== CENTRAL DO GALO | COLETA DE NOTÍCIAS | {modo} ===")
+        problemas = []
+
         for result in results:
-            print(
+            resumo = (
                 f"{result.fonte}: "
                 f"candidatos={result.candidatos} | "
                 f"novos={result.novos_encontrados} | "
@@ -75,6 +85,31 @@ def main() -> None:
                 f"erros={result.erros} | "
                 f"status={result.mensagem}"
             )
+            print(resumo)
+
+            sem_candidatos = not args.historico and result.candidatos == 0
+            if result.erros > 0 or sem_candidatos:
+                motivos = []
+                if result.erros > 0:
+                    motivos.append(f"{result.erros} erro(s)")
+                if sem_candidatos:
+                    motivos.append("0 candidatos")
+                detalhe = f"{result.fonte}: {', '.join(motivos)} | {result.mensagem}"
+                problemas.append(detalhe)
+
+                if os.getenv("GITHUB_ACTIONS") == "true":
+                    print(
+                        f"::error title=Falha na coleta de {result.fonte}::{detalhe}"
+                    )
+
+        if args.strict and problemas:
+            print(
+                "\nColeta marcada como falha porque uma ou mais fontes precisam de revisão:",
+                file=sys.stderr,
+            )
+            for problema in problemas:
+                print(f"- {problema}", file=sys.stderr)
+            raise SystemExit(2)
     finally:
         if not usar_store_remoto:
             close_pool()
