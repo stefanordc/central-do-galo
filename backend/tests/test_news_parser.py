@@ -211,3 +211,31 @@ def test_google_news_thumbnail_escolhe_card_do_titulo_e_ignora_logo_generica() -
         target_title="PVC vê problema no Atlético e analisa clássico com Cruzeiro",
     )
     assert result == "https://lh3.googleusercontent.com/foto-real=s0-w440-h264"
+
+def test_falagalo_usa_rss_como_fonte_principal() -> None:
+    rule = get_rule("falagalo")
+    assert rule.prefer_feed is True
+    assert "https://falagalo.com.br/feed/" in rule.feed_urls
+
+
+def test_espn_aceita_artigos_em_diferentes_editorias() -> None:
+    html = """
+    <html><body>
+      <a href="https://www.espn.com.br/futebol/santos/artigo/_/id/17234883/atletico-mg-prepara-time">
+        Atlético-MG prepara time para a próxima rodada
+      </a>
+      <a href="https://www.espn.com.br/futebol/copa-do-brasil/artigo/_/id/17234097/galo-busca-vaga">
+        Galo busca vaga na Copa do Brasil
+      </a>
+      <a href="https://www.espn.com.br/futebol/flamengo/artigo/_/id/17230000/noticia-do-flamengo">
+        Flamengo prepara time para a próxima rodada
+      </a>
+    </body></html>
+    """
+    result = extract_candidates(html, get_rule("espn-atletico-mg"))
+    assert len(result) == 2
+    assert {item.titulo for item in result} == {
+        "Atlético-MG prepara time para a próxima rodada",
+        "Galo busca vaga na Copa do Brasil",
+    }
+
