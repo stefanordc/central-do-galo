@@ -15,6 +15,8 @@ class CollectorRule:
     recent_limit: int | None = None
     recent_pages: int = 3
     feed_urls: tuple[str, ...] = ()
+    json_urls: tuple[str, ...] = ()
+    json_team_ids: tuple[str, ...] = ()
     history_feed_templates: tuple[str, ...] = ()
     history_page_templates: tuple[str, ...] = ()
     history_max_pages: int = 25
@@ -166,6 +168,13 @@ RULES: dict[str, CollectorRule] = {
             re.IGNORECASE,
         ),
         required_title_pattern=re.compile(r"\b(atl[eé]tico(?:-mg)?|galo)\b", re.IGNORECASE),
+        json_urls=(
+            "https://site.api.espn.com/apis/site/v2/sports/soccer/bra.1/teams/7632/news?lang=pt&region=br&limit=50",
+            "https://site.api.espn.com/apis/site/v2/sports/soccer/bra.1/news?lang=pt&region=br&limit=50",
+            "https://site.api.espn.com/apis/site/v2/sports/soccer/bra.copa_do_brazil/news?lang=pt&region=br&limit=50",
+            "https://site.api.espn.com/apis/site/v2/sports/soccer/conmebol.sudamericana/news?lang=pt&region=br&limit=50",
+        ),
+        json_team_ids=("7632",),
     ),
 }
 
