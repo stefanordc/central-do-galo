@@ -2,8 +2,11 @@
 
 import {
   createContext,
+  memo,
   ReactNode,
+  useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
 } from "react";
@@ -27,6 +30,7 @@ type YoutubePlayerContextValue = {
 };
 
 const YoutubePlayerContext = createContext<YoutubePlayerContextValue | null>(null);
+const PLAYER_SESSION_KEY = "central-do-galo:youtube-player";
 
 function buildEmbedUrl(video: GlobalYoutubeVideo): string {
   const raw =
@@ -39,12 +43,81 @@ function buildEmbedUrl(video: GlobalYoutubeVideo): string {
     url.searchParams.set("autoplay", "1");
     url.searchParams.set("playsinline", "1");
     url.searchParams.set("rel", "0");
+    url.searchParams.set("enablejsapi", "1");
+
+    if (typeof window !== "undefined") {
+      url.searchParams.set("origin", window.location.origin);
+    }
+
     return url.toString();
   } catch {
     const separator = raw.includes("?") ? "&" : "?";
-    return `${raw}${separator}autoplay=1&playsinline=1&rel=0`;
+    return `${raw}${separator}autoplay=1&playsinline=1&rel=0&enablejsapi=1`;
   }
 }
+
+function restaurarVideoDaSessao(): GlobalYoutubeVideo | null {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const raw = window.sessionStorage.getItem(PLAYER_SESSION_KEY);
+    if (!raw) return null;
+
+    const value = JSON.parse(raw) as Partial<GlobalYoutubeVideo>;
+    if (
+      typeof value.video_id !== "string" ||
+      !value.video_id.trim() ||
+      typeof value.titulo !== "string" ||
+      typeof value.id !== "string"
+    ) {
+      window.sessionStorage.removeItem(PLAYER_SESSION_KEY);
+      return null;
+    }
+
+    return {
+      id: value.id,
+      video_id: value.video_id,
+      titulo: value.titulo,
+      url: typeof value.url === "string" ? value.url : `https://www.youtube.com/watch?v=${value.video_id}`,
+      tipo:
+        value.tipo === "short" || value.tipo === "live"
+          ? value.tipo
+          : "video",
+      fonte_nome: typeof value.fonte_nome === "string" ? value.fonte_nome : "YouTube",
+      fonte_slug: typeof value.fonte_slug === "string" ? value.fonte_slug : "",
+      metadados:
+        value.metadados && typeof value.metadados === "object"
+          ? value.metadados
+          : {},
+    };
+  } catch {
+    window.sessionStorage.removeItem(PLAYER_SESSION_KEY);
+    return null;
+  }
+}
+
+const PersistentYoutubeFrame = memo(function PersistentYoutubeFrame({
+  video,
+}: {
+  video: GlobalYoutubeVideo;
+}) {
+  const embedUrl = useMemo(
+    () => buildEmbedUrl(video),
+    [video.video_id, video.metadados]
+  );
+
+  return (
+    <div className="youtube-player-frame">
+      <iframe
+        src={embedUrl}
+        title={video.titulo}
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+        referrerPolicy="strict-origin-when-cross-origin"
+        allowFullScreen
+      />
+    </div>
+  );
+});
 
 function PersistentYoutubePlayer({
   video,
@@ -73,7 +146,7 @@ function PersistentYoutubePlayer({
       <div className="youtube-player-topbar">
         <div>
           <span>
-            {foraDaPaginaVideos ? "Reproduzindo em segundo plano" : video.fonte_nome}
+            {foraDaPaginaVideos ? "Continuando reprodução" : video.fonte_nome}
           </span>
           <strong>{video.titulo}</strong>
         </div>
@@ -101,16 +174,7 @@ function PersistentYoutubePlayer({
         </div>
       </div>
 
-      <div className="youtube-player-frame">
-        <iframe
-          key={video.video_id}
-          src={buildEmbedUrl(video)}
-          title={video.titulo}
-          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-          referrerPolicy="strict-origin-when-cross-origin"
-          allowFullScreen
-        />
-      </div>
+      <PersistentYoutubeFrame video={video} />
     </section>
   );
 }
@@ -122,19 +186,49 @@ export default function YoutubePlayerProvider({
 }) {
   const [video, setVideo] = useState<GlobalYoutubeVideo | null>(null);
 
+  useEffect(() => {
+    const restaurado = restaurarVideoDaSessao();
+    if (restaurado) {
+      setVideo(restaurado);
+    }
+  }, []);
+
+  const playVideo = useCallback((novoVideo: GlobalYoutubeVideo) => {
+    setVideo(novoVideo);
+
+    try {
+      window.sessionStorage.setItem(
+        PLAYER_SESSION_KEY,
+        JSON.stringify(novoVideo)
+      );
+    } catch {
+      // O player continua funcionando mesmo se o navegador bloquear sessionStorage.
+    }
+  }, []);
+
+  const closeVideo = useCallback(() => {
+    setVideo(null);
+
+    try {
+      window.sessionStorage.removeItem(PLAYER_SESSION_KEY);
+    } catch {
+      // Nada a fazer: o estado em memória já foi limpo.
+    }
+  }, []);
+
   const value = useMemo<YoutubePlayerContextValue>(
     () => ({
       video,
-      playVideo: setVideo,
-      closeVideo: () => setVideo(null),
+      playVideo,
+      closeVideo,
     }),
-    [video]
+    [video, playVideo, closeVideo]
   );
 
   return (
     <YoutubePlayerContext.Provider value={value}>
       {children}
-      <PersistentYoutubePlayer video={video} onClose={() => setVideo(null)} />
+      <PersistentYoutubePlayer video={video} onClose={closeVideo} />
     </YoutubePlayerContext.Provider>
   );
 }
