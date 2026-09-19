@@ -728,7 +728,6 @@ function formatarDuracaoVideo(valor: unknown): string | null {
 function rotuloLive(video: VideoYoutube): string {
   const status = typeof video.metadados.live_status === "string" ? video.metadados.live_status : "";
   if (status === "is_live") return "AO VIVO";
-  if (status === "is_upcoming") return "EM BREVE";
   return "TRANSMISSÃO";
 }
 
@@ -799,11 +798,14 @@ function VideoShelf({
 
   const outrosItens =
     variant === "live"
-      ? items.filter(
-          (video) =>
-            typeof video.metadados.live_status !== "string" ||
-            video.metadados.live_status !== "is_live"
-        )
+      ? items.filter((video) => {
+          const status =
+            typeof video.metadados.live_status === "string"
+              ? video.metadados.live_status
+              : "";
+
+          return status !== "is_live" && status !== "is_upcoming";
+        })
       : items;
 
   return (
@@ -836,7 +838,7 @@ function VideoShelf({
 
       {variant === "live" && outrosItens.length > 0 && livesAgora.length > 0 && (
         <div className="youtube-live-secondary-heading">
-          <strong>Próximas transmissões e histórico recente</strong>
+          <strong>Histórico recente</strong>
         </div>
       )}
 
@@ -1135,12 +1137,21 @@ export default function CentralDoGaloPage({
 
         return blocos
           .flat()
+          .filter((video) => {
+            if (tipo !== "live") return true;
+
+            const status =
+              typeof video.metadados.live_status === "string"
+                ? video.metadados.live_status
+                : "";
+
+            return status !== "is_upcoming";
+          })
           .sort((a, b) => {
             if (tipo === "live") {
               const prioridadeLive: Record<string, number> = {
                 is_live: 0,
-                is_upcoming: 1,
-                was_live: 2,
+                was_live: 1,
               };
 
               const statusA =
@@ -1502,7 +1513,14 @@ export default function CentralDoGaloPage({
 
   const videosYoutubeFiltrados = filtrarVideos(videosYoutube);
   const shortsYoutubeFiltrados = filtrarVideos(shortsYoutube);
-  const livesYoutubeFiltrados = filtrarVideos(livesYoutube);
+  const livesYoutubeFiltrados = filtrarVideos(livesYoutube).filter((video) => {
+    const status =
+      typeof video.metadados.live_status === "string"
+        ? video.metadados.live_status
+        : "";
+
+    return status !== "is_upcoming";
+  });
 
   const configuracaoFiltroVideos = {
     video: {
@@ -1521,7 +1539,7 @@ export default function CentralDoGaloPage({
     },
     live: {
       titulo: "Ao Vivo",
-      subtitulo: "Ao vivo agora, próximas transmissões e histórico recente.",
+      subtitulo: "Ao vivo agora e histórico recente.",
       items: livesYoutubeFiltrados,
       totalOriginal: livesYoutube.length,
       variant: "live" as const,
