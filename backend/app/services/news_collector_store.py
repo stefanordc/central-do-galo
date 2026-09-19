@@ -86,19 +86,54 @@ def _github_oidc_token() -> str:
 
 
 def _remote_call(action: str, **payload):
-    token = _github_oidc_token()
+    ultimo_erro: Exception | None = None
 
-    with httpx.Client(timeout=45.0, follow_redirects=True) as client:
-        response = client.post(
-            _REMOTE_URL,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-            },
-            json={"action": action, **payload},
-        )
-        response.raise_for_status()
-        return response.json()
+    for tentativa in range(1, 5):
+        token = _github_oidc_token()
+
+        try:
+            timeout = httpx.Timeout(
+                connect=20.0,
+                read=120.0,
+                write=30.0,
+                pool=20.0,
+            )
+
+            with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+                response = client.post(
+                    _REMOTE_URL,
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json",
+                    },
+                    json={"action": action, **payload},
+                )
+
+                if response.status_code in {429, 502, 503, 504}:
+                    raise httpx.HTTPStatusError(
+                        f"Resposta temporária HTTP {response.status_code}",
+                        request=response.request,
+                        response=response,
+                    )
+
+                response.raise_for_status()
+                return response.json()
+        except (
+            httpx.ReadTimeout,
+            httpx.ConnectTimeout,
+            httpx.RemoteProtocolError,
+            httpx.HTTPStatusError,
+        ) as exc:
+            ultimo_erro = exc
+            if tentativa >= 4:
+                raise
+
+            time.sleep(min(12.0, 1.5 * (2 ** (tentativa - 1))))
+
+    if ultimo_erro is not None:
+        raise ultimo_erro
+
+    raise RuntimeError(f"Falha remota inesperada na ação {action}.")
 
 
 def obter_fonte_por_slug(slug: str) -> dict | None:
@@ -117,8 +152,15 @@ def urls_ja_cadastradas(urls: Iterable[str]) -> set[str]:
     if not _remote_enabled():
         return _local_urls_ja_cadastradas(values)
 
-    result = _remote_call("existing_urls", urls=values)
-    return set(result.get("urls", []))
+    existentes: set[str] = set()
+    tamanho_lote = 120
+
+    for inicio in range(0, len(values), tamanho_lote):
+        lote = values[inicio : inicio + tamanho_lote]
+        result = _remote_call("existing_urls", urls=lote)
+        existentes.update(result.get("urls", []))
+
+    return existentes
 
 
 def urls_sem_imagem(urls: Iterable[str]) -> set[str]:
@@ -129,8 +171,15 @@ def urls_sem_imagem(urls: Iterable[str]) -> set[str]:
     if not _remote_enabled():
         return _local_urls_sem_imagem(values)
 
-    result = _remote_call("missing_images", urls=values)
-    return set(result.get("urls", []))
+    faltantes: set[str] = set()
+    tamanho_lote = 120
+
+    for inicio in range(0, len(values), tamanho_lote):
+        lote = values[inicio : inicio + tamanho_lote]
+        result = _remote_call("missing_images", urls=lote)
+        faltantes.update(result.get("urls", []))
+
+    return faltantes
 
 
 def atualizar_imagem_noticia_por_url(
