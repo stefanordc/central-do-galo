@@ -153,7 +153,7 @@ def urls_ja_cadastradas(urls: Iterable[str]) -> set[str]:
         return _local_urls_ja_cadastradas(values)
 
     existentes: set[str] = set()
-    tamanho_lote = 120
+    tamanho_lote = 100
 
     for inicio in range(0, len(values), tamanho_lote):
         lote = values[inicio : inicio + tamanho_lote]
@@ -172,7 +172,7 @@ def urls_sem_imagem(urls: Iterable[str]) -> set[str]:
         return _local_urls_sem_imagem(values)
 
     faltantes: set[str] = set()
-    tamanho_lote = 120
+    tamanho_lote = 100
 
     for inicio in range(0, len(values), tamanho_lote):
         lote = values[inicio : inicio + tamanho_lote]
