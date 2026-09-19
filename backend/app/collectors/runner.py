@@ -15,6 +15,7 @@ from app.collectors.parser import (
     extract_google_news_thumbnail,
     extract_candidates,
     parse_feed_xml,
+    parse_json_news,
     parse_sitemap_xml,
 )
 from app.collectors.rules import RULES, CollectorRule, get_rule
@@ -264,6 +265,67 @@ class NewsCollectorRunner:
             discovered_by=discovered_by,
         )
 
+
+    def _fetch_json_candidates(
+        self,
+        *,
+        client: httpx.Client,
+        rule: CollectorRule,
+        url: str,
+        discovered_by: str,
+        result: CollectionResult,
+    ) -> list[ArticleCandidate] | None:
+        try:
+            response = client.get(
+                url,
+                headers={"Accept": "application/json, */*;q=0.5"},
+            )
+            if response.status_code in {404, 410}:
+                return []
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            print(f"[{rule.slug}] API JSON não acessível {url}: {exc}")
+            return None
+
+        result.paginas_lidas += 1
+        return parse_json_news(
+            response.content,
+            rule,
+            api_url=url,
+            discovered_by=discovered_by,
+        )
+
+    def _collect_current_json(
+        self,
+        *,
+        client: httpx.Client,
+        robots: RobotsCache,
+        source: dict,
+        rule: CollectorRule,
+        result: CollectionResult,
+    ) -> bool:
+        json_worked = False
+        for json_url in rule.json_urls:
+            candidates = self._fetch_json_candidates(
+                client=client,
+                rule=rule,
+                url=json_url,
+                discovered_by="json-api",
+                result=result,
+            )
+            if candidates is None:
+                continue
+            json_worked = True
+            self._process_candidates(
+                client=client,
+                robots=robots,
+                source=source,
+                rule=rule,
+                candidates=candidates,
+                result=result,
+            )
+        return json_worked
+
     def _collect_current_feeds(
         self,
         *,
@@ -505,6 +567,14 @@ class NewsCollectorRunner:
         with build_http_client() as client:
             robots = RobotsCache(client)
 
+            json_worked = self._collect_current_json(
+                client=client,
+                robots=robots,
+                source=source,
+                rule=rule,
+                result=result,
+            )
+
             feed_worked = self._collect_current_feeds(
                 client=client,
                 robots=robots,
@@ -540,7 +610,7 @@ class NewsCollectorRunner:
                         result=result,
                     )
 
-            if not listing_worked and not feed_worked:
+            if not listing_worked and not feed_worked and not json_worked:
                 result.mensagem = "robots.txt não permite ou fonte não pôde ser lida"
                 return result
 
@@ -582,6 +652,8 @@ class NewsCollectorRunner:
             )
         elif feed_worked and not listing_worked:
             result.mensagem = "RSS coletado; listagem HTML não acessível"
+        elif json_worked and result.candidatos > 0:
+            result.mensagem = "API JSON coletada"
         return result
 
     def collect_all(
