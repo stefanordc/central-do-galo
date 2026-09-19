@@ -9,6 +9,9 @@ on:
       - main
     paths:
       - ".github/workflows/atualizar-noticias.yml"
+      - "backend/app/services/news_collector_store.py"
+      - "backend/scripts/coletar_noticias.py"
+      - "backend/app/collectors/**"
 
 permissions:
   contents: read
@@ -22,7 +25,7 @@ jobs:
   coletar:
     name: Coletar noticias recentes
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     defaults:
       run:
