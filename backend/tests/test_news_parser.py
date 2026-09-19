@@ -322,3 +322,36 @@ def test_parse_espn_json_news_aceita_categoria_mesmo_sem_nome_no_titulo() -> Non
     assert len(result) == 1
     assert result[0].titulo == "Renan Lodi revela bastidores após classificação"
 
+def test_espn_usa_google_news_rss_quando_site_bloqueia_coletor() -> None:
+    rule = get_rule("espn-atletico-mg")
+    assert rule.prefer_feed is True
+    assert len(rule.feed_urls) >= 2
+    assert all(url.startswith("https://news.google.com/rss/search?") for url in rule.feed_urls)
+    assert rule.feed_proxy_pattern is not None
+
+
+def test_parse_espn_google_news_feed_fallback() -> None:
+    from app.collectors.parser import parse_feed_xml
+
+    xml = """<?xml version="1.0" encoding="UTF-8"?>
+    <rss version="2.0">
+      <channel>
+        <item>
+          <title>Atlético-MG define time para a próxima rodada - ESPN</title>
+          <link>https://news.google.com/rss/articles/ESPN123</link>
+          <pubDate>Sat, 19 Sep 2026 12:00:00 -0300</pubDate>
+          <source url="https://www.espn.com.br">ESPN</source>
+        </item>
+      </channel>
+    </rss>""".encode("utf-8")
+
+    result = parse_feed_xml(
+        xml,
+        get_rule("espn-atletico-mg"),
+        feed_url=get_rule("espn-atletico-mg").feed_urls[0],
+    )
+
+    assert len(result) == 1
+    assert result[0].url.startswith("https://news.google.com/")
+    assert "Atlético-MG" in result[0].titulo
+
