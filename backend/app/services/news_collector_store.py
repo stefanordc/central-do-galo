@@ -219,7 +219,7 @@ def salvar_noticia(
     fonte_id: UUID | str,
     oficial: bool,
     article: ArticleMetadata,
-) -> UUID:
+) -> UUID | str:
     if not _remote_enabled():
         return _local_salvar_noticia(
             fonte_id=fonte_id,
@@ -243,11 +243,18 @@ def salvar_noticia(
         },
     )
 
-    # No modo remoto, a Edge Function/RPC já devolve o identificador da notícia.\n    # Não reconvertemos com UUID() aqui: o valor só precisa ser serializado na\n    # chamada seguinte (save_categories), e uma conversão extra fazia a coleta\n    # falhar com "badly formed hexadecimal UUID string" em respostas válidas.\n    noticia_id = result.get("id")\n    if noticia_id is None or not str(noticia_id).strip():\n        raise RuntimeError("save_news remoto não retornou o id da notícia")\n    return str(noticia_id).strip()
+    # No modo remoto, a Edge Function/RPC já devolve o identificador da notícia.
+    # Não reconvertemos com UUID() aqui: o valor só precisa ser serializado na
+    # chamada seguinte (save_categories), e uma conversão extra fazia a coleta
+    # falhar com "badly formed hexadecimal UUID string" em respostas válidas.
+    noticia_id = result.get("id")
+    if noticia_id is None or not str(noticia_id).strip():
+        raise RuntimeError("save_news remoto não retornou o id da notícia")
+    return str(noticia_id).strip()
 
 
 def save_news_categories(
-    noticia_id: UUID,
+    noticia_id: UUID | str,
     titulo: str,
     resumo: str | None = None,
 ) -> None:
