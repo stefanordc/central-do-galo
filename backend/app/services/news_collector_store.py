@@ -47,11 +47,11 @@ def _jwt_exp(token: str) -> int:
         return 0
 
 
-def _github_oidc_token() -> str:
+def _github_oidc_token(*, force_refresh: bool = False) -> str:
     global _cached_oidc_token, _cached_oidc_exp
 
     now = int(time.time())
-    if _cached_oidc_token and _cached_oidc_exp > now + 60:
+    if not force_refresh and _cached_oidc_token and _cached_oidc_exp > now + 60:
         return _cached_oidc_token
 
     if _REMOTE_TOKEN:
@@ -86,10 +86,12 @@ def _github_oidc_token() -> str:
 
 
 def _remote_call(action: str, **payload):
+    global _cached_oidc_token, _cached_oidc_exp
+
     ultimo_erro: Exception | None = None
 
     for tentativa in range(1, 5):
-        token = _github_oidc_token()
+        token = _github_oidc_token(force_refresh=tentativa > 1)
 
         try:
             timeout = httpx.Timeout(
@@ -120,6 +122,18 @@ def _remote_call(action: str, **payload):
                     mensagem = f"HTTP {response.status_code}"
                     if detail_text:
                         mensagem += f": {detail_text[:1000]}"
+
+                    # Um 401 pode ocorrer se o token OIDC em cache deixar de ser
+                    # aceito durante uma coleta longa. Quando usamos OIDC dinâmico,
+                    # descartamos o cache e repetimos com um token recém-emitido.
+                    if response.status_code == 401 and not _REMOTE_TOKEN:
+                        _cached_oidc_token = None
+                        _cached_oidc_exp = 0
+                        raise httpx.HTTPStatusError(
+                            mensagem,
+                            request=response.request,
+                            response=response,
+                        )
 
                     # 429 e erros 5xx podem ser transitórios na Edge Function.
                     # Fazemos retry, mas preservamos o detalhe real devolvido pelo
