@@ -243,7 +243,7 @@ def salvar_noticia(
         },
     )
 
-    return UUID(str(result["id"]))
+    # No modo remoto, a Edge Function/RPC já devolve o identificador da notícia.\n    # Não reconvertemos com UUID() aqui: o valor só precisa ser serializado na\n    # chamada seguinte (save_categories), e uma conversão extra fazia a coleta\n    # falhar com "badly formed hexadecimal UUID string" em respostas válidas.\n    noticia_id = result.get("id")\n    if noticia_id is None or not str(noticia_id).strip():\n        raise RuntimeError("save_news remoto não retornou o id da notícia")\n    return str(noticia_id).strip()
 
 
 def save_news_categories(
