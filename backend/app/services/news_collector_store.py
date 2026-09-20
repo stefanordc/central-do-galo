@@ -109,14 +109,30 @@ def _remote_call(action: str, **payload):
                     json={"action": action, **payload},
                 )
 
-                if response.status_code in {429, 502, 503, 504}:
-                    raise httpx.HTTPStatusError(
-                        f"Resposta temporária HTTP {response.status_code}",
-                        request=response.request,
-                        response=response,
-                    )
+                if response.status_code >= 400:
+                    try:
+                        error_payload = response.json()
+                        detail = error_payload.get("detail") if isinstance(error_payload, dict) else None
+                    except (ValueError, json.JSONDecodeError):
+                        detail = None
 
-                response.raise_for_status()
+                    detail_text = str(detail).strip() if detail else response.text.strip()
+                    mensagem = f"HTTP {response.status_code}"
+                    if detail_text:
+                        mensagem += f": {detail_text[:1000]}"
+
+                    # 429 e erros 5xx podem ser transitórios na Edge Function.
+                    # Fazemos retry, mas preservamos o detalhe real devolvido pelo
+                    # servidor para o log final caso todas as tentativas falhem.
+                    if response.status_code == 429 or response.status_code >= 500:
+                        raise httpx.HTTPStatusError(
+                            mensagem,
+                            request=response.request,
+                            response=response,
+                        )
+
+                    raise RuntimeError(mensagem)
+
                 return response.json()
         except (
             httpx.ReadTimeout,
