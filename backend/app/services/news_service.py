@@ -94,7 +94,7 @@ def salvar_noticia(
     fonte_id: UUID,
     oficial: bool,
     article: ArticleMetadata,
- ) -> UUID | None:
+) -> UUID | None:
     sql = """
         insert into public.noticias (
             fonte_id,
