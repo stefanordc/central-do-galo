@@ -148,6 +148,12 @@ class NewsCollectorRunner:
                     oficial=bool(source["oficial"]),
                     article=base_article,
                 )
+                if noticia_id is None:
+                    print(
+                        f"[{rule.slug}] ignorado pelo filtro de banco: {candidate.url}"
+                    )
+                    continue
+
                 save_news_categories(
                     noticia_id=noticia_id,
                     titulo=base_article.titulo,
@@ -180,6 +186,9 @@ class NewsCollectorRunner:
                     oficial=bool(source["oficial"]),
                     article=article,
                 )
+                if noticia_id is None:
+                    continue
+
                 save_news_categories(
                     noticia_id=noticia_id,
                     titulo=article.titulo,
