@@ -279,7 +279,17 @@ def salvar_noticia(
     # falhar com "badly formed hexadecimal UUID string" em respostas válidas.
     noticia_id = result.get("id")
     if noticia_id is None or not str(noticia_id).strip():
-        raise RuntimeError("save_news remoto não retornou o id da notícia")
+        # Defesa adicional: se a resposta de gravação vier sem id por qualquer
+        # inconsistência transitória, confirmamos a linha pela URL antes de
+        # considerar a coleta como falha.
+        lookup = _remote_call("get_news_id", url=article.url)
+        noticia_id = lookup.get("id")
+
+    if noticia_id is None or not str(noticia_id).strip():
+        raise RuntimeError(
+            "save_news remoto não retornou o id e a notícia não foi localizada pela URL"
+        )
+
     return str(noticia_id).strip()
 
 
