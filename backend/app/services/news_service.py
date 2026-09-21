@@ -94,7 +94,7 @@ def salvar_noticia(
     fonte_id: UUID,
     oficial: bool,
     article: ArticleMetadata,
-) -> UUID:
+ ) -> UUID | None:
     sql = """
         insert into public.noticias (
             fonte_id,
@@ -140,7 +140,8 @@ def salvar_noticia(
                     json.dumps(article.metadados, ensure_ascii=False),
                 ),
             )
-            noticia_id = cur.fetchone()[0]
+            row = cur.fetchone()
+            noticia_id = row[0] if row else None
         conn.commit()
     return noticia_id
 
