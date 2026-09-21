@@ -140,6 +140,37 @@ def test_noataque_google_news_feed_fallback() -> None:
     assert result[0].url.startswith("https://news.google.com/")
 
 
+def test_noataque_google_news_ignora_atletico_de_madrid_e_laliga() -> None:
+    from app.collectors.parser import parse_feed_xml
+
+    xml = """<?xml version="1.0" encoding="UTF-8"?>
+    <rss version="2.0">
+      <channel>
+        <item>
+          <title>Atlético de Madrid vence pela LaLiga - No Ataque</title>
+          <link>https://news.google.com/rss/articles/MADRID123</link>
+          <pubDate>Sun, 20 Sep 2026 12:00:00 -0300</pubDate>
+          <source url="https://noataque.com.br">No Ataque</source>
+        </item>
+        <item>
+          <title>Atlético-MG define time para clássico - No Ataque</title>
+          <link>https://news.google.com/rss/articles/GALO123</link>
+          <pubDate>Sun, 20 Sep 2026 12:05:00 -0300</pubDate>
+          <source url="https://noataque.com.br">No Ataque</source>
+        </item>
+      </channel>
+    </rss>""".encode("utf-8")
+
+    result = parse_feed_xml(
+        xml,
+        get_rule("noataque-atletico"),
+        feed_url=get_rule("noataque-atletico").feed_urls[0],
+    )
+
+    assert len(result) == 1
+    assert result[0].titulo == "Atlético-MG define time para clássico"
+
+
 def test_extract_google_news_thumbnail() -> None:
     from app.collectors.parser import extract_google_news_thumbnail
 
