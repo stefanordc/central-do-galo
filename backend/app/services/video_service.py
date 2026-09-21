@@ -1456,7 +1456,7 @@ class YoutubePublicScraper:
                 const url = new URL(href, location.origin);
 
                 if (tipo === 'short') {
-                  const m = url.pathname.match(/\/shorts\/([A-Za-z0-9_-]{6,})/);
+                  const m = url.pathname.match(new RegExp('/shorts/([A-Za-z0-9_-]{6,})'));
                   return m ? m[1] : null;
                 }
 
