@@ -107,6 +107,10 @@ RULES: dict[str, CollectorRule] = {
             re.IGNORECASE,
         ),
         required_title_pattern=re.compile(r"\b(atl[eé]tico(?:-mg)?|galo)\b", re.IGNORECASE),
+        blocked_title_pattern=re.compile(
+            r"\b(?:atl[eé]tico(?:\s+de)?\s+madrid|laliga)\b",
+            re.IGNORECASE,
+        ),
         feed_urls=(
             "https://news.google.com/rss/search?q=site%3Anoataque.com.br+Atl%C3%A9tico&hl=pt-BR&gl=BR&ceid=BR%3Apt-419",
             "https://news.google.com/rss/search?q=site%3Anoataque.com.br+Atl%C3%A9tico-MG&hl=pt-BR&gl=BR&ceid=BR%3Apt-419",
