@@ -249,7 +249,7 @@ def salvar_noticia(
     fonte_id: UUID | str,
     oficial: bool,
     article: ArticleMetadata,
-) -> UUID | str:
+) -> UUID | str | None:
     if not _remote_enabled():
         return _local_salvar_noticia(
             fonte_id=fonte_id,
@@ -273,15 +273,16 @@ def salvar_noticia(
         },
     )
 
-    # No modo remoto, a Edge Function/RPC já devolve o identificador da notícia.
-    # Não reconvertemos com UUID() aqui: o valor só precisa ser serializado na
-    # chamada seguinte (save_categories), e uma conversão extra fazia a coleta
-    # falhar com "badly formed hexadecimal UUID string" em respostas válidas.
+    # Um trigger defensivo pode bloquear deliberadamente notícias irrelevantes
+    # (por exemplo Atlético de Madrid no feed do No Ataque). Isso é descarte
+    # esperado, não erro da coleta.
+    if bool(result.get("skipped")):
+        return None
+
     noticia_id = result.get("id")
     if noticia_id is None or not str(noticia_id).strip():
-        # Defesa adicional: se a resposta de gravação vier sem id por qualquer
-        # inconsistência transitória, confirmamos a linha pela URL antes de
-        # considerar a coleta como falha.
+        # Defesa adicional: se a resposta vier sem id sem indicar descarte,
+        # confirmamos pela URL antes de considerar falha real.
         lookup = _remote_call("get_news_id", url=article.url)
         noticia_id = lookup.get("id")
 
