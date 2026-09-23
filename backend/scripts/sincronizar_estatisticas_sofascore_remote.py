@@ -272,6 +272,63 @@ def _fotmob_lineups(detail: dict) -> dict:
     return {lado: {"players": players}}
 
 
+def _aplicar_agenda_oficial_validada() -> dict:
+    return remote_call(
+        "apply_schedule_patch",
+        updates=[
+            {
+                "id_externo": "sofascore:15235414",
+                "only_if_status": "adiado",
+                "inicio_em": "2026-10-03T21:30:00+00:00",
+                "status": "agendado",
+                "gols_mandante": None,
+                "gols_visitante": None,
+                "metadados": {
+                    "fonte_agenda": "atletico_oficial",
+                    "fonte_agenda_url": "https://atletico.com.br/futebol/agenda/",
+                    "agenda_validada_em": "2026-09-23",
+                },
+            }
+        ],
+        inserts=[
+            {
+                "id_externo": "atletico-oficial:camxmct:2026-10-14",
+                "competicao_nome": "Copa Sul-Americana",
+                "competicao_temporada": "CONMEBOL Sudamericana 2026",
+                "rodada": "Semifinals",
+                "mandante": "Atlético Mineiro",
+                "visitante": "Montevideo City Torque",
+                "inicio_em": "2026-10-14T22:00:00+00:00",
+                "estadio": "Arena MRV",
+                "cidade": "Belo Horizonte",
+                "status": "agendado",
+                "metadados": {
+                    "fonte_agenda": "atletico_oficial",
+                    "fonte_agenda_url": "https://atletico.com.br/partida/atletico-mg-x-montevideo-city-torque/",
+                    "provisorio_id_externo": True,
+                },
+            },
+            {
+                "id_externo": "atletico-oficial:mctxcam:2026-10-21",
+                "competicao_nome": "Copa Sul-Americana",
+                "competicao_temporada": "CONMEBOL Sudamericana 2026",
+                "rodada": "Semifinals",
+                "mandante": "Montevideo City Torque",
+                "visitante": "Atlético Mineiro",
+                "inicio_em": "2026-10-21T22:00:00+00:00",
+                "estadio": "Centenário",
+                "cidade": "Montevidéu",
+                "status": "agendado",
+                "metadados": {
+                    "fonte_agenda": "atletico_oficial",
+                    "fonte_agenda_url": "https://atletico.com.br/partida/montevideo-city-torque-x-atletico-mg/",
+                    "provisorio_id_externo": True,
+                },
+            },
+        ],
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Sincroniza estatísticas coletivas via SofaScore e individuais via FotMob."
@@ -284,6 +341,9 @@ def main() -> None:
         help="Reprocessa todos os jogos oficiais finalizados da temporada.",
     )
     args = parser.parse_args()
+
+    agenda_result = _aplicar_agenda_oficial_validada()
+    logger.info("[Dados] agenda oficial aplicada: %s", agenda_result)
 
     jogos_resp = remote_call(
         "list_games",
