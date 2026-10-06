@@ -281,6 +281,12 @@ const X_PAGE_SIZE = 20;
 const YOUTUBE_PAGE_SIZE = 13;
 const FALLBACK_NEWS_IMAGE = "/central-do-galo-logo.png";
 
+const ESPORTE_DE_COMBATE = /\b(?:mma|ufc|bellator|peso[\s-]+galo|peso[\s-]+pena|peso[\s-]+mosca|oct[oó]gono|jiu[\s-]+jitsu|boxe)\b/i;
+
+function noticiaDeFutebol(noticia: Noticia): boolean {
+  return !ESPORTE_DE_COMBATE.test(noticia.titulo) && !ESPORTE_DE_COMBATE.test(noticia.url);
+}
+
 function usarLogoComoFallback(noticia: Noticia): boolean {
   const imagem = noticia.imagem_url?.trim() ?? "";
 
@@ -1759,7 +1765,7 @@ export default function CentralDoGaloPage({
       )}
 
       <section className="news-grid">
-        {noticias.map((noticia) => {
+        {noticias.filter(noticiaDeFutebol).map((noticia) => {
           const categoriaPrincipal = noticia.categorias.find((categoria) => categoria.principal);
           const categoriasSecundarias = noticia.categorias.filter(
             (categoria) => !categoria.principal

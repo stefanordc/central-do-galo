@@ -13,7 +13,7 @@ from urllib.parse import parse_qsl, unquote, urlencode, urljoin, urlsplit, urlun
 from bs4 import BeautifulSoup
 
 from app.collectors.models import ArticleCandidate, ArticleMetadata
-from app.collectors.rules import CollectorRule
+from app.collectors.rules import CollectorRule, is_non_football_news
 
 
 TRACKING_QUERY_PREFIXES = ("utm_", "fbclid", "gclid", "mc_")
@@ -72,6 +72,8 @@ def _candidate_allowed(
     allow_feed_proxy: bool = False,
     skip_required_title: bool = False,
 ) -> bool:
+    if is_non_football_news(title, url):
+        return False
     if rule.blocked_url_pattern and rule.blocked_url_pattern.search(url):
         return False
     if rule.blocked_title_pattern and rule.blocked_title_pattern.search(title):
@@ -653,7 +655,7 @@ def parse_sitemap_xml(
             continue
 
         title = _first_child_text(item, "title") or _title_from_url(url)
-        if rule.required_title_pattern and not rule.required_title_pattern.search(title):
+        if not _candidate_allowed(title, url, rule):
             continue
 
         published_raw = (
