@@ -167,6 +167,7 @@ RULES: dict[str, CollectorRule] = {
     "espn-atletico-mg": CollectorRule(
         slug="espn-atletico-mg",
         listing_url="https://www.espn.com.br/futebol/time/_/id/7632/bra.atltico-mg",
+        json_team_ids=("7632",),
         article_pattern=re.compile(
             r"^https://www\.espn\.com\.br/futebol/(?:[a-z0-9-]+/)*artigo/_/id/\d+(?:/[^?#]+)?$",
             re.IGNORECASE,
@@ -187,3 +188,15 @@ def get_rule(slug: str) -> CollectorRule:
         return RULES[slug]
     except KeyError as exc:
         raise ValueError(f"Fonte sem coletor ativo: {slug}") from exc
+
+
+# "Galo" também é uma categoria de peso: não é evidência de vínculo com o clube.
+NON_FOOTBALL_PATTERN = re.compile(
+    r"\b(?:mma|ufc|bellator|peso[\s-]+galo|peso[\s-]+pena|"
+    r"peso[\s-]+mosca|oct[oó]gono|jiu[\s-]+jitsu|boxe)\b",
+    re.IGNORECASE,
+)
+
+
+def is_non_football_news(title: str, url: str) -> bool:
+    return bool(NON_FOOTBALL_PATTERN.search(title) or NON_FOOTBALL_PATTERN.search(url))
